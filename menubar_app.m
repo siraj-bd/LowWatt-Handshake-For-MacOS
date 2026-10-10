@@ -373,32 +373,28 @@ static void powerSourceNotificationCallback(void *context) {
         }
     }
 
+    int connectedPortIdx = 0;
+    int bestIdx = -1;
+    CFTypeRef bestIdxRef = IORegistryEntryCreateCFProperty(service, SEC_CFSTR(BestAdapterIndex), kCFAllocatorDefault, 0);
+    if (bestIdxRef && CFGetTypeID(bestIdxRef) == CFNumberGetTypeID()) {
+        CFNumberGetValue((CFNumberRef)bestIdxRef, kCFNumberIntType, &bestIdx);
+        CFRelease(bestIdxRef);
+    }
+    if (bestIdx >= 0) connectedPortIdx = bestIdx;
+
     // 4. Query physical USB-C Port Controllers for actively connected port PDOs
     CFArrayRef portInfo = (CFArrayRef)IORegistryEntryCreateCFProperty(service, SEC_CFSTR(PortControllerInfo), kCFAllocatorDefault, 0);
     int portPdoMaxW = 0;
     if (portInfo && CFGetTypeID(portInfo) == CFArrayGetTypeID()) {
         CFIndex portCount = CFArrayGetCount(portInfo);
-        int connectedPortIdx = -1;
-
-        int bestIdx = -1;
-        CFTypeRef bestIdxRef = IORegistryEntryCreateCFProperty(service, SEC_CFSTR(BestAdapterIndex), kCFAllocatorDefault, 0);
-        if (bestIdxRef && CFGetTypeID(bestIdxRef) == CFNumberGetTypeID()) {
-            CFNumberGetValue((CFNumberRef)bestIdxRef, kCFNumberIntType, &bestIdx);
-            CFRelease(bestIdxRef);
-        }
-
-        // 1. Prioritize port where hardware attach count > detach count (actively plugged in)
-        for (CFIndex i = 0; i < portCount; i++) {
-            CFDictionaryRef pDict = (CFDictionaryRef)CFArrayGetValueAtIndex(portInfo, i);
-            if (pDict && CFGetTypeID(pDict) == CFDictionaryGetTypeID()) {
-                int attach = 0, detach = 0;
-                CFNumberRef attNum = (CFNumberRef)CFDictionaryGetValue(pDict, SEC_CFSTR(PortControllerAttachCount));
-                CFNumberRef detNum = (CFNumberRef)CFDictionaryGetValue(pDict, SEC_CFSTR(PortControllerDetachCount));
-                if (attNum && CFGetTypeID(attNum) == CFNumberGetTypeID()) CFNumberGetValue(attNum, kCFNumberIntType, &attach);
-                if (detNum && CFGetTypeID(detNum) == CFNumberGetTypeID()) CFNumberGetValue(detNum, kCFNumberIntType, &detach);
-                if (attach > detach) {
-                    if (connectedPortIdx == -1 || (int)i == bestIdx) {
+        if (connectedPortIdx < 0 || (CFIndex)connectedPortIdx >= portCount) {
+            for (CFIndex i = 0; i < portCount; i++) {
+                CFDictionaryRef pDict = (CFDictionaryRef)CFArrayGetValueAtIndex(portInfo, i);
+                if (pDict && CFGetTypeID(pDict) == CFDictionaryGetTypeID()) {
+                    CFArrayRef pdoArr = (CFArrayRef)CFDictionaryGetValue(pDict, SEC_CFSTR(PortControllerPortPDO));
+                    if (pdoArr && CFGetTypeID(pdoArr) == CFArrayGetTypeID() && CFArrayGetCount(pdoArr) > 0) {
                         connectedPortIdx = (int)i;
+                        break;
                     }
                 }
             }
@@ -470,8 +466,9 @@ static void powerSourceNotificationCallback(void *context) {
     NSString *detectedBrand = @"";
     if (fedDetails && CFGetTypeID(fedDetails) == CFArrayGetTypeID()) {
         CFIndex fedCount = CFArrayGetCount(fedDetails);
-        for (CFIndex i = 0; i < fedCount; i++) {
-            CFDictionaryRef fDict = (CFDictionaryRef)CFArrayGetValueAtIndex(fedDetails, i);
+        CFIndex targetIdx = (connectedPortIdx >= 0 && (CFIndex)connectedPortIdx < fedCount) ? (CFIndex)connectedPortIdx : 0;
+        if (targetIdx < fedCount) {
+            CFDictionaryRef fDict = (CFDictionaryRef)CFArrayGetValueAtIndex(fedDetails, targetIdx);
             if (fDict && CFGetTypeID(fDict) == CFDictionaryGetTypeID()) {
                 CFNumberRef vidNum = (CFNumberRef)CFDictionaryGetValue(fDict, SEC_CFSTR(FedVendorID));
                 if (vidNum && CFGetTypeID(vidNum) == CFNumberGetTypeID()) {
@@ -535,17 +532,16 @@ static void powerSourceNotificationCallback(void *context) {
 
     // Power bank vs Wall charger classification
     BOOL isPB = NO;
-    if (detectedBatterySupply || detectedDRP) {
-        // Dual-Role Power (DRP) or Battery Supply PDO proves portable battery / power bank
+    if (detectedBatterySupply) {
+        isPB = YES;
+    } else if (detectedDRP && !detectedUnconstrained) {
+        isPB = YES;
+    } else if (detectedDRP && *outRatedWatts > 0 && *outRatedWatts <= 30) {
         isPB = YES;
     } else if ([combinedDesc containsString:@"power bank"] || [combinedDesc containsString:@"powerbank"] || [combinedDesc containsString:@"portable"]) {
         isPB = YES;
-    } else if (*outRatedWatts > 0 && *outRatedWatts <= 22) {
-        // Low-watt mobile power bank / portable supply
+    } else if (*outRatedWatts > 0 && *outRatedWatts <= 12 && !detectedUnconstrained) {
         isPB = YES;
-    } else if (detectedUnconstrained) {
-        // AC mains wall outlet (Unconstrained and NOT a DRP battery)
-        isPB = NO;
     } else {
         isPB = NO;
     }
