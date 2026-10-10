@@ -34,6 +34,8 @@ Previously, the only workaround was tedious:
 **LowWatt Handshake macOS** completely eliminates this pain! It continuously monitors the hardware power controller and automatically applies an instant I/O Kit wake-pulse whenever a low-wattage cable is plugged in — ensuring a successful USB-PD handshake **100 out of 100 times** without rebooting or closing your laptop lid.
 
 > **Cable Requirement:** Any standard USB Type-C to Type-C cable (both sides must be Type-C).
+>
+> ⚠️ **Quality Brand Requirement:** Always use standard, certified brand chargers and power banks (such as **Anker, Apple, Belkin, UGREEN, Baseus, Samsung**, etc.). Never use unbranded or low-quality local chargers. See [Hardware Advisory & Disclaimer](#️-important-hardware-advisory--safety-disclaimer).
 
 ---
 
@@ -125,6 +127,40 @@ make install
   - macOS 13 Ventura
   - macOS 14 Sonoma
   - macOS 15 Sequoia and newer
+
+---
+
+## ⚠️ Important Hardware Advisory & Safety Disclaimer
+
+### 🔌 Hardware Advisory: Use Reputable Brands Only
+When using **LowWatt Handshake macOS** to charge your MacBook with lower-wattage sources or power banks, **always ensure your power accessories are from reputable, certified brands** (such as **Anker, Apple, Belkin, UGREEN, Baseus, Samsung, Shargeek**, etc.) that strictly comply with the USB Power Delivery (USB-PD) specification.
+
+- **Certified Power Delivery Handshake:** Quality brands feature genuine USB-PD controller chips that negotiate safe voltage steps (5V, 9V, 12V, 15V, 20V) and dynamically adapt current without voltage ripple or current spikes.
+- **Essential Hardware Protections:** Certified adapters include Over-Voltage Protection (OVP), Over-Current Protection (OCP), Over-Temperature Protection (OTP), and short-circuit safeguards.
+
+### 🚫 Warning: Avoid Cheap Local & Unbranded Chargers
+**Never attempt to charge your MacBook using cheap local chargers, counterfeit adapters, or unbranded generic power banks.**
+Substandard or unbranded power accessories often lack:
+- Accurate voltage regulation and ripple filtering (which can send dirty, unstable power into your MacBook).
+- Over-voltage / over-current circuit protection.
+- Proper USB-PD handshake controller silicon.
+
+Connecting uncertified or counterfeit power accessories can cause severe electrical stress, degrade your MacBook's battery health prematurely, or damage the internal USB-C port controller and PMU (Power Management Unit).
+
+---
+
+### 🛡️ Limitation of Liability & Disclaimer
+
+> [!CAUTION]
+> **Strict Disclaimer of Liability:**  
+> **LowWatt Handshake macOS** is provided as free and open-source software on an **"AS IS"** and **"AS AVAILABLE"** basis without warranties of any kind, whether express or implied.
+> 
+> The developers, author, and project contributors **assume NO liability or responsibility** for any battery wear, battery degradation, electrical damage, hardware malfunction, system failures, or any other direct or indirect damages resulting from:
+> 1. The use of low-quality, cheap local, counterfeit, or unbranded chargers, power banks, or adapters.
+> 2. The use of defective, damaged, or non-compliant cables.
+> 3. Connecting improper or substandard power sources to your MacBook.
+> 
+> **Any use of low-quality, unbranded, or non-compliant charging hardware is strictly at the user's sole risk and discretion.**
 
 ---
 
