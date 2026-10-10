@@ -1,0 +1,32 @@
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+
+# Thumbnails and caches
+._*
+.Spotlight-V100
+.Trashes
+
+# Temporary files
+/tmp/
+*.log
+*.err
+dmg_root/
+
+# Build outputs (can be rebuilt via Makefile)
+*.o
+*.dSYM/
+test_*
+crop_*
+comp_*
+EOF
+
+# Compiled Binaries & Bundles
+*.dmg
+*.app/
+AnkerHandshakeMenubar
+anker-handshake-keeper
+smc_kick
+LowWatt Handshake macOS
