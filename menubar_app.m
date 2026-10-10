@@ -373,31 +373,55 @@ static void powerSourceNotificationCallback(void *context) {
         }
     }
 
-    int connectedPortIdx = 0;
-    int bestIdx = -1;
-    CFTypeRef bestIdxRef = IORegistryEntryCreateCFProperty(service, SEC_CFSTR(BestAdapterIndex), kCFAllocatorDefault, 0);
-    if (bestIdxRef && CFGetTypeID(bestIdxRef) == CFNumberGetTypeID()) {
-        CFNumberGetValue((CFNumberRef)bestIdxRef, kCFNumberIntType, &bestIdx);
-        CFRelease(bestIdxRef);
-    }
-    if (bestIdx >= 0) connectedPortIdx = bestIdx;
+    int connectedPortIdx = -1;
 
     // 4. Query physical USB-C Port Controllers for actively connected port PDOs
     CFArrayRef portInfo = (CFArrayRef)IORegistryEntryCreateCFProperty(service, SEC_CFSTR(PortControllerInfo), kCFAllocatorDefault, 0);
     int portPdoMaxW = 0;
     if (portInfo && CFGetTypeID(portInfo) == CFArrayGetTypeID()) {
         CFIndex portCount = CFArrayGetCount(portInfo);
-        if (connectedPortIdx < 0 || (CFIndex)connectedPortIdx >= portCount) {
+
+        // Step 1: Detect actively connected port where hardware attach > detach count
+        // If multiple ports are connected, select the winning provider (loser == 0)
+        for (CFIndex i = 0; i < portCount; i++) {
+            CFDictionaryRef pDict = (CFDictionaryRef)CFArrayGetValueAtIndex(portInfo, i);
+            if (pDict && CFGetTypeID(pDict) == CFDictionaryGetTypeID()) {
+                int attach = 0, detach = 0, loser = 1;
+                CFNumberRef attNum = (CFNumberRef)CFDictionaryGetValue(pDict, SEC_CFSTR(PortControllerAttachCount));
+                CFNumberRef detNum = (CFNumberRef)CFDictionaryGetValue(pDict, SEC_CFSTR(PortControllerDetachCount));
+                CFNumberRef losNum = (CFNumberRef)CFDictionaryGetValue(pDict, SEC_CFSTR(PortControllerLoserReason));
+                if (attNum && CFGetTypeID(attNum) == CFNumberGetTypeID()) CFNumberGetValue(attNum, kCFNumberIntType, &attach);
+                if (detNum && CFGetTypeID(detNum) == CFNumberGetTypeID()) CFNumberGetValue(detNum, kCFNumberIntType, &detach);
+                if (losNum && CFGetTypeID(losNum) == CFNumberGetTypeID()) CFNumberGetValue(losNum, kCFNumberIntType, &loser);
+                if (attach > detach) {
+                    if (connectedPortIdx < 0 || loser == 0) {
+                        connectedPortIdx = (int)i;
+                    }
+                }
+            }
+        }
+
+        // Step 2: Fallback if attach count equals detach count during transient:
+        // Identify port with active power FETs and winning contract (FetStatus > 0 && LoserReason == 0)
+        if (connectedPortIdx < 0) {
             for (CFIndex i = 0; i < portCount; i++) {
                 CFDictionaryRef pDict = (CFDictionaryRef)CFArrayGetValueAtIndex(portInfo, i);
                 if (pDict && CFGetTypeID(pDict) == CFDictionaryGetTypeID()) {
-                    CFArrayRef pdoArr = (CFArrayRef)CFDictionaryGetValue(pDict, SEC_CFSTR(PortControllerPortPDO));
-                    if (pdoArr && CFGetTypeID(pdoArr) == CFArrayGetTypeID() && CFArrayGetCount(pdoArr) > 0) {
+                    int loser = 1, fet = 0;
+                    CFNumberRef losNum = (CFNumberRef)CFDictionaryGetValue(pDict, SEC_CFSTR(PortControllerLoserReason));
+                    CFNumberRef fetNum = (CFNumberRef)CFDictionaryGetValue(pDict, SEC_CFSTR(PortControllerFetStatus));
+                    if (losNum && CFGetTypeID(losNum) == CFNumberGetTypeID()) CFNumberGetValue(losNum, kCFNumberIntType, &loser);
+                    if (fetNum && CFGetTypeID(fetNum) == CFNumberGetTypeID()) CFNumberGetValue(fetNum, kCFNumberIntType, &fet);
+                    if (loser == 0 && fet > 0) {
                         connectedPortIdx = (int)i;
                         break;
                     }
                 }
             }
+        }
+
+        if (connectedPortIdx < 0) {
+            connectedPortIdx = 0;
         }
 
         // Strictly only parse if a port is physically attached (attach > detach)
@@ -448,12 +472,15 @@ static void powerSourceNotificationCallback(void *context) {
         }
         CFRelease(portInfo);
     }
+    (void)detectedUnconstrained;
 
     // Determine Rated Capacity (Yellow Text):
     // Strictly prioritize the actual attached charger/power bank negotiated wattage
     int rated = 0;
     if (rawMenuMaxW > 0) {
         rated = rawMenuMaxW;
+    } else if (portPdoMaxW > 0) {
+        rated = portPdoMaxW;
     } else if (adapterWatts > 0) {
         rated = adapterWatts;
     } else if (rawWatts > 0) {
@@ -531,16 +558,16 @@ static void powerSourceNotificationCallback(void *context) {
     }
 
     // Power bank vs Wall charger classification
+    // 100% hardware-driven: Dual-Role Power (DRP) or Battery PDO identifies Power Bank
+    // Wall chargers physically lack internal batteries and cannot act as a Sink (DRP == 0)
     BOOL isPB = NO;
-    if (detectedBatterySupply) {
+    if (detectedBatterySupply || detectedDRP) {
+        // Dual-Role Power (DRP) or Battery Supply PDO proves portable battery / power bank at ANY wattage (5W to 140W+)
         isPB = YES;
-    } else if (detectedDRP && !detectedUnconstrained) {
-        isPB = YES;
-    } else if (detectedDRP && *outRatedWatts > 0 && *outRatedWatts <= 30) {
-        isPB = YES;
-    } else if ([combinedDesc containsString:@"power bank"] || [combinedDesc containsString:@"powerbank"] || [combinedDesc containsString:@"portable"]) {
-        isPB = YES;
-    } else if (*outRatedWatts > 0 && *outRatedWatts <= 12 && !detectedUnconstrained) {
+    } else if ([combinedDesc containsString:@"power bank"] || 
+               [combinedDesc containsString:@"powerbank"] || 
+               [combinedDesc containsString:@"portable battery"] ||
+               [combinedDesc containsString:@"battery pack"]) {
         isPB = YES;
     } else {
         isPB = NO;
