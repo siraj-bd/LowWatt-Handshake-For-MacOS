@@ -535,28 +535,23 @@ static void powerSourceNotificationCallback(void *context) {
 
     // Power bank vs Wall charger classification
     BOOL isPB = NO;
-    if (detectedBatterySupply) {
+    if (detectedBatterySupply || detectedDRP) {
+        // Dual-Role Power (DRP) or Battery Supply PDO proves portable battery / power bank
         isPB = YES;
     } else if ([combinedDesc containsString:@"power bank"] || [combinedDesc containsString:@"powerbank"] || [combinedDesc containsString:@"portable"]) {
         isPB = YES;
-    } else if (detectedUnconstrained) {
-        // Connected to AC mains wall outlet (Unconstrained Power == 1)
-        isPB = NO;
-    } else if (detectedDRP && *outRatedWatts > 0 && *outRatedWatts <= 30) {
-        // Dual-role power portable bank negotiated at <= 30W
-        isPB = YES;
     } else if (*outRatedWatts > 0 && *outRatedWatts <= 22) {
-        // Low-watt mobile power bank
+        // Low-watt mobile power bank / portable supply
         isPB = YES;
+    } else if (detectedUnconstrained) {
+        // AC mains wall outlet (Unconstrained and NOT a DRP battery)
+        isPB = NO;
     } else {
         isPB = NO;
     }
 
     *outIsPowerBank = isPB;
     *outIsAnker = (detectedAnker || [detectedBrand isEqualToString:@"Anker"]);
-    if (isPB && detectedBrand.length == 0) {
-        detectedBrand = @"Anker";
-    }
     *outBrand = detectedBrand;
 
     // Live battery charging wattage from instantaneous ADC (Coulomb counter)
