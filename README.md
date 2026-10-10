@@ -9,7 +9,7 @@
 
 **A lightweight native macOS background utility to enable seamless USB-C Power Delivery (PD) charging with low-wattage chargers (15W+), power banks, and third-party adapters on MacBooks without handshake misses, sleep stalls, or shutdown tricks.**
 
-[Download Latest DMG](https://github.com/siraj-bd/lowwatt-handshake-macos/releases) • [Features](#key-features) • [How It Works](#the-problem-and-how-it-works) • [Installation](#installation) • [Build From Source](#build-from-source)
+[Download Latest DMG](https://github.com/siraj-bd/lowwatt-handshake-macos/releases) • [Features](#key-features) • [How It Works](#the-problem-and-how-it-works) • [Installation](#-installation--download) • [Hardware Advisory](#️-important-hardware-advisory--safety-disclaimer)
 
 ---
 
@@ -70,38 +70,20 @@ When a MacBook is running, its Type-C port controller enters low-power idle stat
 
 ---
 
-## 📦 Installation
-
-### Option 1: DMG Installer (Recommended)
-1. Download the latest `LowWatt-Handshake-macOS.dmg` from the [Releases](https://github.com/siraj-bd/lowwatt-handshake-macos/releases) section.
-2. Double-click the DMG and drag **LowWatt Handshake macOS** into your `Applications` folder.
-3. Open **LowWatt Handshake macOS** from Applications or Spotlight.
-4. The 3D battery icon will immediately appear in your top menu bar!
-
-### Option 2: Automatic Startup on Login (Optional)
-To make the application start automatically whenever your Mac powers on:
-```bash
-cp com.siraj.lowwatthandshake.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.siraj.lowwatthandshake.plist
-```
-
 ---
 
-## 🛠️ Build From Source
+## 📦 Installation & Download
 
-Requirements: macOS with Xcode Command Line Tools (`clang`).
+### Download Pre-Compiled DMG (Universal Binary)
+1. Download the latest **[LowWatt-Handshake-macOS.dmg](https://github.com/siraj-bd/lowwatt-handshake-macos/releases)** from the Releases section.
+2. Open the downloaded `.dmg` and drag **LowWatt Handshake macOS** into your `Applications` folder.
+3. Launch **LowWatt Handshake macOS** from Applications or Spotlight.
+4. The 3D battery widget will immediately appear in your top menu bar!
 
-```bash
-# Clone the repository
-git clone https://github.com/siraj-bd/lowwatt-handshake-macos.git
-cd lowwatt-handshake-macos
+### Automatic Startup on Login (Optional)
+To have LowWatt Handshake automatically run in the background on system startup:
+- Open **System Settings ➔ General ➔ Login Items & Extensions**, click **+** under *Open at Login*, and add **LowWatt Handshake macOS**.
 
-# Build the application bundle and DMG
-make
-
-# Install to /Applications
-make install
-```
 
 ---
 

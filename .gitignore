@@ -31,6 +31,16 @@ anker-handshake-keeper
 smc_kick
 LowWatt Handshake macOS
 
+# Protected Source Code & Dev Headers (Private Master)
+*.m
+*.c
+*.h
+Makefile
+Info.plist
+*.plist
+battery_*_base.png
+AppIcon.icns
+
 # Backups
 _backup_pre_audit/
 _master_source_private_backup/
