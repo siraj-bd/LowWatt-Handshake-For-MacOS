@@ -5,13 +5,17 @@
 #import <IOKit/pwr_mgt/IOPMLib.h>
 #import <AudioToolbox/AudioToolbox.h>
 #import <notify.h>
+#import <sys/stat.h>
 #import "security_obfuscation.h"
 
 @interface AppDelegate : NSObject <NSApplicationDelegate>
 @property (strong, nonatomic) NSStatusItem *statusItem;
 @property (strong, nonatomic) NSTimer *timer;
 @property (strong, nonatomic) NSTimer *burstTimer;
+@property (strong, nonatomic) NSTimer *updateCheckTimer;
 @property (assign, nonatomic) int burstCounter;
+@property (assign, nonatomic) int stalledCounter;
+@property (assign, nonatomic) BOOL isUpdating;
 @property (assign, nonatomic) BOOL lastConnected;
 @property (strong, nonatomic) NSImage *connectedBaseImage;
 @property (strong, nonatomic) NSImage *disconnectedBaseImage;
@@ -23,6 +27,8 @@
 - (void)performSilentUpdateCheck;
 - (void)checkForUpdates;
 - (void)checkForUpdatesSilent:(BOOL)silent;
+- (void)downloadAndApplyUpdateWithUrl:(NSString *)downloadUrl version:(NSString *)version silent:(BOOL)silent;
+- (BOOL)isVersion:(NSString *)remoteVer newerThan:(NSString *)currentVer;
 - (void)manualKickstart;
 - (void)getDetailedPowerInfoConnected:(BOOL *)outConnected 
                           isPowerBank:(BOOL *)outIsPowerBank
@@ -168,15 +174,24 @@ static void powerSourceNotificationCallback(void *context) {
     }];
     [[NSRunLoop currentRunLoop] addTimer:self.timer forMode:NSRunLoopCommonModes];
 
-    // Default auto-check updates to YES and run silent check after 10s
+    // Default auto-check updates to YES and run silent check after 15s
     if ([[NSUserDefaults standardUserDefaults] objectForKey:@"AutoCheckUpdates"] == nil) {
         [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"AutoCheckUpdates"];
     }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if ([[NSUserDefaults standardUserDefaults] boolForKey:@"AutoCheckUpdates"]) {
             [weakSelf performSilentUpdateCheck];
         }
     });
+
+    // Periodic silent update check every 4 hours (14400s)
+    self.updateCheckTimer = [NSTimer scheduledTimerWithTimeInterval:14400.0 repeats:YES block:^(NSTimer * _Nonnull timer) {
+        (void)timer;
+        if ([[NSUserDefaults standardUserDefaults] boolForKey:@"AutoCheckUpdates"]) {
+            [weakSelf performSilentUpdateCheck];
+        }
+    }];
+    [[NSRunLoop currentRunLoop] addTimer:self.updateCheckTimer forMode:NSRunLoopCommonModes];
 }
 
 - (void)executeHandshakePulse {
@@ -849,6 +864,18 @@ static void powerSourceNotificationCallback(void *context) {
                                    desc:&desc];
     self.detectedBrand = brand;
 
+    // Auto-kickstart on 0W stall when physically connected to a power source
+    if (connected && actualWatts <= 0.0) {
+        self.stalledCounter++;
+        // Trigger pulse at 4s (tick 20), and if still stalled, re-try every 5s (every 25 ticks)
+        if (self.stalledCounter == 20 || (self.stalledCounter > 20 && (self.stalledCounter % 25 == 0))) {
+            [self executeHandshakePulse];
+            [self startFastBurstPoll];
+        }
+    } else {
+        self.stalledCounter = 0;
+    }
+
     // Trigger fast 100ms burst on state changes (plug in / unplug)
     if (connected != self.lastConnected) {
         [self startFastBurstPoll];
@@ -952,10 +979,12 @@ static void powerSourceNotificationCallback(void *context) {
 
     // 1. Apple-style Header Card (App Name -> 3D Brand Logo -> Version)
     NSImage *brandLogo = [self loadBrandLogo];
+    NSString *appVer = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"] ?: @"1.0.0";
+    NSString *verString = [NSString stringWithFormat:@"Version %@", appVer];
     HeaderCardView *cardView = [[HeaderCardView alloc] initWithFrame:NSMakeRect(0, 0, 260, 108)
                                                            logoImage:brandLogo
                                                                title:@"LowWatt Handshake macOS"
-                                                             version:@"Version 1.0.0"];
+                                                             version:verString];
     NSMenuItem *cardItem = [[NSMenuItem alloc] init];
     cardItem.view = cardView;
     [menu addItem:cardItem];
@@ -1121,10 +1150,28 @@ static void powerSourceNotificationCallback(void *context) {
 }
 
 - (void)manualKickstart {
+    if (!self.lastConnected) {
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = @"No Charger Connected";
+        alert.informativeText = @"Please plug in your USB-C charger or power bank first.\n\nOnce connected, Force Handshake Kickstart will send a hardware excitation pulse and Darwin notification cascade to re-negotiate power delivery.";
+        [alert addButtonWithTitle:@"OK"];
+        [NSApp activateIgnoringOtherApps:YES];
+        [alert runModal];
+        return;
+    }
+
     [self executeHandshakePulse];
     AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
     [self startFastBurstPoll];
     [self updatePowerStateAndCheck];
+}
+
+- (BOOL)isVersion:(NSString *)remoteVer newerThan:(NSString *)currentVer {
+    NSString *cleanRemote = [remoteVer stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"vV \t\r\n"]];
+    NSString *cleanCurrent = [currentVer stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"vV \t\r\n"]];
+    if ([cleanRemote length] == 0) return NO;
+    if ([cleanCurrent length] == 0) return YES;
+    return [cleanRemote compare:cleanCurrent options:NSNumericSearch] == NSOrderedDescending;
 }
 
 - (void)checkForUpdates {
@@ -1135,30 +1182,161 @@ static void powerSourceNotificationCallback(void *context) {
     [self checkForUpdatesSilent:YES];
 }
 
+- (void)downloadAndApplyUpdateWithUrl:(NSString *)downloadUrl version:(NSString *)version silent:(BOOL)silent {
+    if (self.isUpdating) return;
+    self.isUpdating = YES;
+
+    if (!silent) {
+        NSAlert *downAlert = [[NSAlert alloc] init];
+        downAlert.messageText = @"Downloading Update";
+        downAlert.informativeText = [NSString stringWithFormat:@"Downloading LowWatt Handshake %@ in the background. The app will automatically install and restart when ready.", version];
+        [downAlert addButtonWithTitle:@"OK"];
+        [downAlert runModal];
+    }
+
+    NSURL *targetUrl = [NSURL URLWithString:downloadUrl];
+    if (!targetUrl) {
+        self.isUpdating = NO;
+        return;
+    }
+
+    NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
+    NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
+
+    __weak typeof(self) weakSelf = self;
+    NSURLSessionDownloadTask *dTask = [session downloadTaskWithURL:targetUrl completionHandler:^(NSURL * _Nullable location, NSURLResponse * _Nullable response, NSError * _Nullable error) {
+        (void)response;
+        if (error || !location) {
+            weakSelf.isUpdating = NO;
+            if (!silent) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    NSAlert *errAlert = [[NSAlert alloc] init];
+                    errAlert.messageText = @"Download Failed";
+                    errAlert.informativeText = [NSString stringWithFormat:@"Failed to download update: %@", error.localizedDescription ?: @"Unknown error"];
+                    [errAlert addButtonWithTitle:@"OK"];
+                    [NSApp activateIgnoringOtherApps:YES];
+                    [errAlert runModal];
+                });
+            }
+            return;
+        }
+
+        NSString *destDmg = @"/tmp/LowWatt_Update.dmg";
+        [[NSFileManager defaultManager] removeItemAtPath:destDmg error:nil];
+        NSError *moveErr = nil;
+        [[NSFileManager defaultManager] moveItemAtURL:location toURL:[NSURL fileURLWithPath:destDmg] error:&moveErr];
+        if (moveErr) {
+            weakSelf.isUpdating = NO;
+            return;
+        }
+
+        NSString *currentBundlePath = [[NSBundle mainBundle] bundlePath];
+        if (!currentBundlePath || currentBundlePath.length == 0) {
+            currentBundlePath = @"/Applications/LowWatt Handshake macOS.app";
+        }
+
+        NSString *scriptContent = [NSString stringWithFormat:
+            @"#!/bin/bash\n"
+            @"sleep 1.2\n"
+            @"MOUNT_DIR=\"/tmp/lowwatt_update_mnt\"\n"
+            @"DMG_PATH=\"/tmp/LowWatt_Update.dmg\"\n"
+            @"TARGET_APP=\"%@\"\n"
+            @"DEFAULT_APP=\"/Applications/LowWatt Handshake macOS.app\"\n"
+            @"\n"
+            @"hdiutil detach \"$MOUNT_DIR\" -force 2>/dev/null || true\n"
+            @"rm -rf \"$MOUNT_DIR\" 2>/dev/null || true\n"
+            @"mkdir -p \"$MOUNT_DIR\"\n"
+            @"\n"
+            @"if hdiutil attach \"$DMG_PATH\" -nobrowse -mountpoint \"$MOUNT_DIR\" -quiet; then\n"
+            @"    NEW_APP=$(find \"$MOUNT_DIR\" -maxdepth 2 -name \"*.app\" | head -n 1)\n"
+            @"    if [ -n \"$NEW_APP\" ] && [ -d \"$NEW_APP\" ]; then\n"
+            @"        xattr -cr \"$NEW_APP\" 2>/dev/null || true\n"
+            @"        rm -rf \"$TARGET_APP\" 2>/dev/null || true\n"
+            @"        cp -R \"$NEW_APP\" \"$TARGET_APP\" 2>/dev/null || true\n"
+            @"        xattr -cr \"$TARGET_APP\" 2>/dev/null || true\n"
+            @"        if [ \"$TARGET_APP\" != \"$DEFAULT_APP\" ] && [ -d \"/Applications\" ]; then\n"
+            @"            rm -rf \"$DEFAULT_APP\" 2>/dev/null || true\n"
+            @"            cp -R \"$NEW_APP\" \"$DEFAULT_APP\" 2>/dev/null || true\n"
+            @"            xattr -cr \"$DEFAULT_APP\" 2>/dev/null || true\n"
+            @"        fi\n"
+            @"    fi\n"
+            @"    hdiutil detach \"$MOUNT_DIR\" -force 2>/dev/null || true\n"
+            @"fi\n"
+            @"\n"
+            @"rm -rf \"$MOUNT_DIR\" 2>/dev/null || true\n"
+            @"rm -f \"$DMG_PATH\" 2>/dev/null || true\n"
+            @"rm -f /tmp/lowwatt_updater.sh 2>/dev/null || true\n"
+            @"\n"
+            @"open -n \"$TARGET_APP\" 2>/dev/null || open -n \"$DEFAULT_APP\" 2>/dev/null || true\n",
+            currentBundlePath];
+
+        NSString *scriptPath = @"/tmp/lowwatt_updater.sh";
+        [scriptContent writeToFile:scriptPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        chmod([scriptPath UTF8String], 0755);
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSTask *task = [[NSTask alloc] init];
+            task.launchPath = @"/bin/bash";
+            task.arguments = @[scriptPath];
+            [task launch];
+
+            [NSApp terminate:nil];
+        });
+    }];
+    [dTask resume];
+}
+
 - (void)checkForUpdatesSilent:(BOOL)silent {
     NSURL *url = [NSURL URLWithString:@"https://api.github.com/repos/siraj-bd/lowwatt-handshake-macos/releases/latest"];
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
     [req setValue:@"LowWattHandshake-macOS" forHTTPHeaderField:@"User-Agent"];
-    [req setTimeoutInterval:8.0];
+    [req setTimeoutInterval:10.0];
 
+    __weak typeof(self) weakSelf = self;
     NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
         (void)response;
         dispatch_async(dispatch_get_main_queue(), ^{
+            NSString *currentVer = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"] ?: @"1.0.0";
+
             if (!error && data) {
                 NSError *jsonErr = nil;
                 NSDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonErr];
-                if (json && json[@"tag_name"]) {
+                if (json && [json isKindOfClass:[NSDictionary class]] && json[@"tag_name"]) {
                     NSString *remoteTag = [json[@"tag_name"] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-                    NSString *currentVer = @"v1.0.0";
-                    if ([remoteTag length] > 0 && ![remoteTag isEqualToString:currentVer]) {
-                        NSAlert *alert = [[NSAlert alloc] init];
-                        alert.messageText = @"Update Available";
-                        alert.informativeText = [NSString stringWithFormat:@"A newer version (%@) of LowWatt Handshake macOS is available.\n\nWould you like to open the download page?", remoteTag];
-                        [alert addButtonWithTitle:@"Download Update"];
-                        [alert addButtonWithTitle:@"Later"];
-                        [NSApp activateIgnoringOtherApps:YES];
-                        if ([alert runModal] == NSAlertFirstButtonReturn) {
-                            [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://github.com/siraj-bd/lowwatt-handshake-macos/releases/latest"]];
+
+                    if ([weakSelf isVersion:remoteTag newerThan:currentVer]) {
+                        NSString *dmgUrl = nil;
+                        NSArray *assets = json[@"assets"];
+                        if ([assets isKindOfClass:[NSArray class]]) {
+                            for (NSDictionary *asset in assets) {
+                                if ([asset isKindOfClass:[NSDictionary class]]) {
+                                    NSString *name = asset[@"name"];
+                                    NSString *dlUrl = asset[@"browser_download_url"];
+                                    if ([name.lowercaseString hasSuffix:@".dmg"] && dlUrl.length > 0) {
+                                        dmgUrl = dlUrl;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (!dmgUrl) {
+                            dmgUrl = [NSString stringWithFormat:@"https://github.com/siraj-bd/lowwatt-handshake-macos/releases/download/%@/LowWatt-Handshake-macOS.dmg", remoteTag];
+                        }
+
+                        if (silent) {
+                            // Automatic background update: download and apply silently without user intervention
+                            [weakSelf downloadAndApplyUpdateWithUrl:dmgUrl version:remoteTag silent:YES];
+                        } else {
+                            // User-triggered check: confirm automated update
+                            NSAlert *alert = [[NSAlert alloc] init];
+                            alert.messageText = @"Update Available";
+                            alert.informativeText = [NSString stringWithFormat:@"A newer version (%@) of LowWatt Handshake macOS is available (current: v%@).\n\nWould you like to install it now? It will download and update automatically without manual installation.", remoteTag, currentVer];
+                            [alert addButtonWithTitle:@"Update Now"];
+                            [alert addButtonWithTitle:@"Later"];
+                            [NSApp activateIgnoringOtherApps:YES];
+                            if ([alert runModal] == NSAlertFirstButtonReturn) {
+                                [weakSelf downloadAndApplyUpdateWithUrl:dmgUrl version:remoteTag silent:NO];
+                            }
                         }
                         return;
                     }
@@ -1167,8 +1345,13 @@ static void powerSourceNotificationCallback(void *context) {
 
             if (!silent) {
                 NSAlert *alert = [[NSAlert alloc] init];
-                alert.messageText = @"You're Up to Date";
-                alert.informativeText = @"LowWatt Handshake macOS v1.0.0 is currently the newest version available.";
+                if (error) {
+                    alert.messageText = @"Update Check Failed";
+                    alert.informativeText = [NSString stringWithFormat:@"Unable to check for updates: %@", error.localizedDescription ?: @"Network error"];
+                } else {
+                    alert.messageText = @"You're Up to Date";
+                    alert.informativeText = [NSString stringWithFormat:@"LowWatt Handshake macOS v%@ is currently the newest version available.", currentVer];
+                }
                 [alert addButtonWithTitle:@"OK"];
                 [NSApp activateIgnoringOtherApps:YES];
                 [alert runModal];
@@ -1190,7 +1373,8 @@ static void powerSourceNotificationCallback(void *context) {
 - (void)openAbout {
     NSAlert *alert = [[NSAlert alloc] init];
     alert.messageText = @"LowWatt Handshake macOS";
-    alert.informativeText = @"Version 1.0.0\n\nA lightweight native background utility for seamless USB-C Power Delivery charging with low-wattage chargers and power banks.\n\n⚠️ Hardware Notice: Always use certified, reputable brand chargers and power banks (e.g. Anker, Apple, UGREEN, Baseus). Never use low-quality local or unbranded generic chargers. The developers disclaim all liability for any battery or hardware damage resulting from substandard third-party accessories.\n\nCopyright © 2026 Siraj. All Rights Reserved.";
+    NSString *appVer = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"] ?: @"1.0.0";
+    alert.informativeText = [NSString stringWithFormat:@"Version %@\n\nA lightweight native background utility for seamless USB-C Power Delivery charging with low-wattage chargers and power banks.\n\n⚠️ Hardware Notice: Always use certified, reputable brand chargers and power banks (e.g. Anker, Apple, UGREEN, Baseus). Never use low-quality local or unbranded generic chargers. The developers disclaim all liability for any battery or hardware damage resulting from substandard third-party accessories.\n\nCopyright © 2026 Siraj. All Rights Reserved.", appVer];
     [alert addButtonWithTitle:@"OK"];
     [alert addButtonWithTitle:@"GitHub Repository"];
     NSImage *logo = [self loadBrandLogo];

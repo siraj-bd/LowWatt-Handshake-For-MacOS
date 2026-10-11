@@ -96,6 +96,9 @@ static const uint8_t K_Watts[] = {0x39, 0x0F, 0x1A, 0x1A, 0x1D}; // len 5
 static const uint8_t K_AppleSmartBattery[] = {0x2F, 0x1E, 0x1E, 0x02, 0x0B, 0x3D, 0x03, 0x0F, 0x1C, 0x1A, 0x2C, 0x0F, 0x1A, 0x1A, 0x0B, 0x1C, 0x17}; // len 17
 static const uint8_t K_com_apple_system_powersources_source[] = {0x0D, 0x01, 0x03, 0x40, 0x0F, 0x1E, 0x1E, 0x02, 0x0B, 0x40, 0x1D, 0x17, 0x1D, 0x1A, 0x0B, 0x03, 0x40, 0x1E, 0x01, 0x19, 0x0B, 0x1C, 0x1D, 0x01, 0x1B, 0x1C, 0x0D, 0x0B, 0x1D, 0x40, 0x1D, 0x01, 0x1B, 0x1C, 0x0D, 0x0B}; // len 36
 static const uint8_t K_com_apple_system_powersources_timer[] = {0x0D, 0x01, 0x03, 0x40, 0x0F, 0x1E, 0x1E, 0x02, 0x0B, 0x40, 0x1D, 0x17, 0x1D, 0x1A, 0x0B, 0x03, 0x40, 0x1E, 0x01, 0x19, 0x0B, 0x1C, 0x1D, 0x01, 0x1B, 0x1C, 0x0D, 0x0B, 0x1D, 0x40, 0x1A, 0x07, 0x03, 0x0B, 0x1C}; // len 35
+static const uint8_t K_com_apple_system_powersources[] = {0x0D, 0x01, 0x03, 0x40, 0x0F, 0x1E, 0x1E, 0x02, 0x0B, 0x40, 0x1D, 0x17, 0x1D, 0x1A, 0x0B, 0x03, 0x40, 0x1E, 0x01, 0x19, 0x0B, 0x1C, 0x1D, 0x01, 0x1B, 0x1C, 0x0D, 0x0B, 0x1D}; // len 29
+static const uint8_t K_com_apple_PowerManagement_rescheduled[] = {0x0D, 0x01, 0x03, 0x40, 0x0F, 0x1E, 0x1E, 0x02, 0x0B, 0x40, 0x3E, 0x01, 0x19, 0x0B, 0x1C, 0x23, 0x0F, 0x00, 0x0F, 0x09, 0x0B, 0x03, 0x0B, 0x00, 0x1A, 0x40, 0x1C, 0x0B, 0x1D, 0x0D, 0x06, 0x0B, 0x0A, 0x1B, 0x02, 0x0B, 0x0A}; // len 37
+static const uint8_t K_com_apple_system_lowpowermode[] = {0x0D, 0x01, 0x03, 0x40, 0x0F, 0x1E, 0x1E, 0x02, 0x0B, 0x40, 0x1D, 0x17, 0x1D, 0x1A, 0x0B, 0x03, 0x40, 0x02, 0x01, 0x19, 0x1E, 0x01, 0x19, 0x0B, 0x1C, 0x03, 0x01, 0x0A, 0x0B}; // len 29
 
 // Dynamic Stack Decryption Routines (optnone to prevent compiler constant-folding)
 __attribute__((noinline, optnone))
@@ -122,59 +125,50 @@ static const char *sec_get_cstr(const uint8_t *data, size_t len, char *out_buf) 
 
 #define SEC_CFSTR(name) ((__bridge CFStringRef)sec_get_string(K_##name, sizeof(K_##name)))
 
-// Control Flow Flattened Hardware Handshake Pulse Engine (optnone to preserve state-machine graph)
+// Control Flow Flattened Hardware Handshake Pulse Engine (Full 5-Point Cascade + Dual PM Assertions)
 __attribute__((noinline, optnone))
 static void execute_hardware_handshake_pulse(void) {
-    volatile uint32_t state = 0x8F4A;
-    int guard = 0;
-    IOPMAssertionID assertionID = 0;
     char s_buf[64];
 
-    while (state != 0 && guard++ < 32) {
-        switch (state ^ 0x8F00) {
-            case 0x4A: {
-                sec_get_cstr(K_com_apple_system_powersources_source, sizeof(K_com_apple_system_powersources_source), s_buf);
-                notify_post(s_buf);
-                state = ((guard * 7) % 2 == 1) ? 0x8F5B : 0x8F99;
-                break;
-            }
-            case 0x5B: {
-                sec_get_cstr(K_com_apple_system_powersources_timer, sizeof(K_com_apple_system_powersources_timer), s_buf);
-                notify_post(s_buf);
-                state = 0x8F6C;
-                break;
-            }
-            case 0x6C: {
-                NSString *astName = sec_get_string(K_LowWattHandshakeKickstart, sizeof(K_LowWattHandshakeKickstart));
-                IOReturn res = IOPMAssertionCreateWithName(
-                    kIOPMAssertionTypePreventUserIdleSystemSleep,
-                    kIOPMAssertionLevelOn,
-                    (__bridge CFStringRef)astName,
-                    &assertionID
-                );
-                state = (res == kIOReturnSuccess) ? 0x8F7D : 0x8FEE;
-                break;
-            }
-            case 0x7D: {
-                usleep(50000); // 50ms hardware power pulse
-                if (assertionID != 0) {
-                    IOPMAssertionRelease(assertionID);
-                    assertionID = 0;
-                }
-                state = 0x0; // Finished successfully
-                break;
-            }
-            case 0x99:
-            case 0xEE:
-            default: {
-                if (assertionID != 0) {
-                    IOPMAssertionRelease(assertionID);
-                }
-                state = 0x0;
-                break;
-            }
-        }
-    }
+    // 1. Five-point Darwin Power Management notification cascade
+    sec_get_cstr(K_com_apple_system_powersources_source, sizeof(K_com_apple_system_powersources_source), s_buf);
+    notify_post(s_buf);
+
+    sec_get_cstr(K_com_apple_system_powersources_timer, sizeof(K_com_apple_system_powersources_timer), s_buf);
+    notify_post(s_buf);
+
+    sec_get_cstr(K_com_apple_system_powersources, sizeof(K_com_apple_system_powersources), s_buf);
+    notify_post(s_buf);
+
+    sec_get_cstr(K_com_apple_PowerManagement_rescheduled, sizeof(K_com_apple_PowerManagement_rescheduled), s_buf);
+    notify_post(s_buf);
+
+    sec_get_cstr(K_com_apple_system_lowpowermode, sizeof(K_com_apple_system_lowpowermode), s_buf);
+    notify_post(s_buf);
+
+    // 2. Dual-level Power Management active assertion cycle (accelerates CC-pin polling)
+    IOPMAssertionID sysAssertion = 0;
+    IOPMAssertionID dispAssertion = 0;
+    NSString *astName = sec_get_string(K_LowWattHandshakeKickstart, sizeof(K_LowWattHandshakeKickstart));
+
+    IOPMAssertionCreateWithName(
+        kIOPMAssertionTypePreventUserIdleSystemSleep,
+        kIOPMAssertionLevelOn,
+        (__bridge CFStringRef)astName,
+        &sysAssertion
+    );
+    IOPMAssertionCreateWithName(
+        kIOPMAssertionTypePreventUserIdleDisplaySleep,
+        kIOPMAssertionLevelOn,
+        (__bridge CFStringRef)astName,
+        &dispAssertion
+    );
+
+    // 60ms hardware excitation window
+    usleep(60000);
+
+    if (sysAssertion != 0) IOPMAssertionRelease(sysAssertion);
+    if (dispAssertion != 0) IOPMAssertionRelease(dispAssertion);
 }
 
 #endif // SECURITY_OBFUSCATION_H
