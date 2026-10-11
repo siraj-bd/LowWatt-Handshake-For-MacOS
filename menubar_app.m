@@ -1379,7 +1379,7 @@ static void powerSourceNotificationCallback(void *context) {
 }
 
 - (void)checkForUpdatesSilent:(BOOL)silent {
-    NSURL *url = [NSURL URLWithString:@"https://api.github.com/repos/siraj-bd/lowwatt-handshake-macos/releases/latest"];
+    NSURL *url = [NSURL URLWithString:@"https://api.github.com/repos/siraj-bd/LowWatt-Handshake-For-MacOS/releases/latest"];
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
     [req setValue:@"LowWattHandshake-macOS" forHTTPHeaderField:@"User-Agent"];
     [req setTimeoutInterval:10.0];
@@ -1412,7 +1412,7 @@ static void powerSourceNotificationCallback(void *context) {
                             }
                         }
                         if (!dmgUrl) {
-                            dmgUrl = [NSString stringWithFormat:@"https://github.com/siraj-bd/lowwatt-handshake-macos/releases/download/%@/LowWatt-Handshake-macOS.dmg", remoteTag];
+                            dmgUrl = [NSString stringWithFormat:@"https://github.com/siraj-bd/LowWatt-Handshake-For-MacOS/releases/download/%@/LowWatt-Handshake-macOS.dmg", remoteTag];
                         }
 
                         if (silent) {
@@ -1476,7 +1476,7 @@ static void powerSourceNotificationCallback(void *context) {
     }
     [NSApp activateIgnoringOtherApps:YES];
     if ([alert runModal] == NSAlertSecondButtonReturn) {
-        [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://github.com/siraj-bd/lowwatt-handshake-macos"]];
+        [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://github.com/siraj-bd/LowWatt-Handshake-For-MacOS"]];
     }
 }
 

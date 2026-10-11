@@ -2,14 +2,14 @@
 
 <div align="center">
 
-[![Platform](https://img.shields.io/badge/Platform-macOS%20(Apple%20Silicon%20%7C%20Intel)-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/siraj-bd/lowwatt-handshake-macos)
+[![Platform](https://img.shields.io/badge/Platform-macOS%20(Apple%20Silicon%20%7C%20Intel)-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/siraj-bd/LowWatt-Handshake-For-MacOS)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
-[![Architecture](https://img.shields.io/badge/Arch-arm64%20%7C%20x86__64-success?style=for-the-badge)](https://github.com/siraj-bd/lowwatt-handshake-macos)
-[![Release](https://img.shields.io/badge/Release-v1.0.0-orange?style=for-the-badge)](https://github.com/siraj-bd/lowwatt-handshake-macos/releases)
+[![Architecture](https://img.shields.io/badge/Arch-arm64%20%7C%20x86__64-success?style=for-the-badge)](https://github.com/siraj-bd/LowWatt-Handshake-For-MacOS)
+[![Release](https://img.shields.io/badge/Release-v1.0.0-orange?style=for-the-badge)](https://github.com/siraj-bd/LowWatt-Handshake-For-MacOS/releases)
 
 **A lightweight native macOS background utility to enable seamless USB-C Power Delivery (PD) charging with low-wattage chargers (15W+), power banks, and third-party adapters on MacBooks without handshake misses, sleep stalls, or shutdown tricks.**
 
-[Download Latest DMG](https://github.com/siraj-bd/lowwatt-handshake-macos/releases) • [Features](#key-features) • [How It Works](#the-problem-and-how-it-works) • [Installation](#-installation--download) • [Hardware Advisory](#️-important-hardware-advisory--safety-disclaimer)
+[Download Latest DMG](https://github.com/siraj-bd/LowWatt-Handshake-For-MacOS/releases) • [Features](#key-features) • [How It Works](#the-problem-and-how-it-works) • [Installation](#-installation--download) • [Hardware Advisory](#️-important-hardware-advisory--safety-disclaimer)
 
 ---
 
@@ -75,7 +75,7 @@ When a MacBook is running, its Type-C port controller enters low-power idle stat
 ## 📦 Installation & Download
 
 ### Download Pre-Compiled DMG (Universal Binary)
-1. Download the latest **[LowWatt-Handshake-macOS.dmg](https://github.com/siraj-bd/lowwatt-handshake-macos/releases)** from the Releases section.
+1. Download the latest **[LowWatt-Handshake-macOS.dmg](https://github.com/siraj-bd/LowWatt-Handshake-For-MacOS/releases)** from the Releases section.
 2. Open the downloaded `.dmg` and drag **LowWatt Handshake macOS** into your `Applications` folder.
 3. Launch **LowWatt Handshake macOS** from Applications or Spotlight.
 4. The 3D battery widget will immediately appear in your top menu bar!
