@@ -125,16 +125,24 @@ Because **LowWatt Handshake macOS** is distributed directly outside the Mac App 
 
 ## 💰 Pricing & Licensing Plans
 
-LowWatt Handshake macOS offers flexible pricing options starting with a **15-Day Free Trial** up to a **Lifetime License**:
+**LowWatt Handshake macOS** offers flexible, transparent pricing designed for everyone — from travelers needing a quick monthly pass to power users wanting lifetime multi-Mac ownership. Try it risk-free with our **15-Day Free Trial** (no credit card required):
 
-| Plan | Price | Devices | Key Features |
-| :--- | :---: | :---: | :--- |
-| **15-Day Free Trial** | **Free ($0.00)** | 1 Mac | Full feature access, auto handshake pulse, real-time live telemetry HUD. |
-| **Monthly Pass** | **$1.99 / mo** | 1 Mac | Flexible month-to-month access for travel or temporary charging setups. Cancel anytime. |
-| **Single Lifetime** | **$9.99 (One-Time)** | 1 Mac | Lifetime license, all future updates included, permanent offline activation. |
-| **Family / Power Pack** | **$19.99 (One-Time)** | Up to 5 Macs | Multi-device lifetime license for all your personal MacBooks and family devices. |
+| # | Plan | Price (USD) | Device Seats | Features & Benefits | Badge |
+| :-: | :--- | :---: | :---: | :--- | :-: |
+| **1** | **15-Day Free Trial** | **Free ($0.00)** | 1 Mac | 100% full feature access, auto handshake pulse, real-time live telemetry. No credit card required. | 🟢 *Free Starter* |
+| **2** | **Single Monthly Pass** | **$1.99 / mo** | 1 Mac | Flexible month-to-month access for travel or temporary charging setups. Cancel anytime. | ⚡ *Flexible* |
+| **3** | **Single 3-Month Pass** | **$4.99 / 3 mos** | 1 Mac | Quarterly pass for extended travel (save ~17% compared to monthly). | ⏱️ *Quarterly* |
+| **4** | **Single Yearly Pass** | **$9.99 / year** | 1 Mac | Full 1-year access with all updates included (save 58% compared to monthly). | 💎 *Best Value* |
+| **5** | **Single Lifetime** | **$19.99 (One-Time)** | 1 Mac | Permanent lifetime license for 1 Mac, all future updates included, offline activation. | ⭐ **Most Popular** |
+| **6** | **Couple / Friends Lifetime** | **$34.99 (One-Time)** | 3 Macs | Permanent lifetime licenses for up to 3 Macs (~$11.66 per device, save $25). | 👥 *Friends Pack* |
+| **7** | **Family / Power Pack** | **$49.99 (One-Time)** | 5 Macs | Lifetime licenses for up to 5 Macs in your household or business (~$10 per device, save $50). | 🔥 **Best Bundle** |
 
-👉 **[Purchase / Manage License via Lemon Squeezy](https://github.com/siraj-bd/LowWatt-Handshake-For-MacOS/releases)** *(Instant digital key delivery with Apple Pay, Visa, Mastercard, and PayPal supported)*.
+---
+
+### 💳 How to Purchase & Activate:
+1. **Instant Key Delivery:** Purchase your license directly through our secure **[Lemon Squeezy Store](https://github.com/siraj-bd/LowWatt-Handshake-For-MacOS/releases)** (supports Apple Pay, Google Pay, Visa, Mastercard, and PayPal).
+2. **In-App Activation:** Open the LowWatt Handshake menu bar item ➔ Click **"🔑 Enter License Key..."** ➔ Paste your key ➔ Click **Activate**.
+3. **Offline Grace:** Once activated, the app works 100% offline — no continuous internet connection required!
 
 ---
 
