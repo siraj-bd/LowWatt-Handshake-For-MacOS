@@ -253,15 +253,47 @@ static void powerSourceNotificationCallback(void *context) {
     }
 
     int timeToFull = -1;
+    CFTypeRef psBlob = IOPSCopyPowerSourcesInfo();
+    CFArrayRef psList = IOPSCopyPowerSourcesList(psBlob);
+    if (psList) {
+        CFIndex psCount = CFArrayGetCount(psList);
+        for (CFIndex i = 0; i < psCount; i++) {
+            CFDictionaryRef ps = IOPSGetPowerSourceDescription(psBlob, CFArrayGetValueAtIndex(psList, i));
+            if (ps && CFGetTypeID(ps) == CFDictionaryGetTypeID()) {
+                CFBooleanRef chgNum = (CFBooleanRef)CFDictionaryGetValue(ps, CFSTR(kIOPSIsChargingKey));
+                if (chgNum == kCFBooleanTrue) {
+                    *outIsCharging = YES;
+                }
+                CFNumberRef psTfNum = (CFNumberRef)CFDictionaryGetValue(ps, CFSTR(kIOPSTimeToFullChargeKey));
+                if (psTfNum && CFGetTypeID(psTfNum) == CFNumberGetTypeID()) {
+                    int tf = 0;
+                    CFNumberGetValue(psTfNum, kCFNumberIntType, &tf);
+                    if (tf > 0 && tf < 65535) {
+                        timeToFull = tf;
+                    }
+                }
+            }
+        }
+        CFRelease(psList);
+    }
+    if (psBlob) CFRelease(psBlob);
     CFTypeRef tFullRef = IORegistryEntryCreateCFProperty(service, SEC_CFSTR(AvgTimeToFull), kCFAllocatorDefault, 0);
     if (tFullRef && CFGetTypeID(tFullRef) == CFNumberGetTypeID()) {
-        CFNumberGetValue((CFNumberRef)tFullRef, kCFNumberIntType, &timeToFull);
+        int tf = 0;
+        CFNumberGetValue((CFNumberRef)tFullRef, kCFNumberIntType, &tf);
+        if (tf > 0 && tf < 65535) {
+            timeToFull = tf;
+        }
         CFRelease(tFullRef);
     }
     if (timeToFull <= 0 || timeToFull >= 65535) {
         CFTypeRef tRemRef = IORegistryEntryCreateCFProperty(service, SEC_CFSTR(TimeRemaining), kCFAllocatorDefault, 0);
         if (tRemRef && CFGetTypeID(tRemRef) == CFNumberGetTypeID()) {
-            CFNumberGetValue((CFNumberRef)tRemRef, kCFNumberIntType, &timeToFull);
+            int tr = 0;
+            CFNumberGetValue((CFNumberRef)tRemRef, kCFNumberIntType, &tr);
+            if (tr > 0 && tr < 65535) {
+                timeToFull = tr;
+            }
             CFRelease(tRemRef);
         }
     }
@@ -839,12 +871,13 @@ static void powerSourceNotificationCallback(void *context) {
             } else {
                 type = brand.length > 0 ? [NSString stringWithFormat:@"%@ Power Adapter", brand] : @"Power Adapter";
             }
-            BOOL isActivelyCharging = (isCharging || batteryWatts > 0.0 || (actualWatts > 1.0 && batteryPct < 100 && notChargingReason == 0));
+            BOOL isHoldLimited = ((notChargingReason & (1 << 24)) != 0);
+            BOOL isActivelyCharging = (!isHoldLimited && !fullyCharged && batteryPct < 100 && (isCharging || batteryWatts > 0.0 || actualWatts > 0.0));
             if (isActivelyCharging) {
                 self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: %d W\nBattery: Charging (%d%%)\nSource: %@ (Max %d W)", (int)round(actualWatts), batteryPct, type, ratedWatts];
             } else if (fullyCharged || batteryPct >= 100) {
                 self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: %d W (Idle Draw)\nBattery: Fully Charged (%d%%)\nSource: %@ (Max %d W)", (int)round(actualWatts), batteryPct, type, ratedWatts];
-            } else if ((notChargingReason & (1 << 24)) != 0) {
+            } else if (isHoldLimited) {
                 self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: %d W (Idle Draw)\nBattery Charging: Paused (Charge Limit Hold at %d%%)\nSource: %@ (Max %d W)", (int)round(actualWatts), batteryPct, type, ratedWatts];
             } else {
                 self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: %d W (Max %d W)\nSource: %@", (int)round(actualWatts), ratedWatts, type];
@@ -958,16 +991,19 @@ static void powerSourceNotificationCallback(void *context) {
         [drawItem setEnabled:NO];
         [menu addItem:drawItem];
 
-        BOOL isActivelyCharging = (isCharging || batteryWatts > 0.0 || (actualWatts > 1.0 && batteryPct < 100 && notChargingReason == 0));
+        BOOL isHoldLimited = ((notChargingReason & (1 << 24)) != 0);
+        BOOL isActivelyCharging = (!isHoldLimited && !fullyCharged && batteryPct < 100 && (isCharging || batteryWatts > 0.0 || actualWatts > 0.0));
 
         NSString *batChgStr;
         if (batteryWatts > 0.0) {
             batChgStr = [NSString stringWithFormat:@"Battery Charging Rate: %.1f W", batteryWatts];
         } else if (isActivelyCharging && actualWatts > 0.0) {
             batChgStr = [NSString stringWithFormat:@"Battery Charging Rate: %d W", (int)round(actualWatts)];
+        } else if (isActivelyCharging) {
+            batChgStr = @"Battery Charging: Active";
         } else if (fullyCharged || batteryPct >= 100) {
             batChgStr = @"Battery Charging: Fully Charged";
-        } else if ((notChargingReason & (1 << 24)) != 0) {
+        } else if (isHoldLimited) {
             batChgStr = @"Battery Charging: On Hold / Paused";
         } else {
             batChgStr = @"Battery Charging: Standby";
@@ -983,10 +1019,10 @@ static void powerSourceNotificationCallback(void *context) {
         NSString *batState;
         if (fullyCharged || batteryPct >= 100) {
             batState = @"Fully Charged";
+        } else if (isHoldLimited) {
+            batState = @"On Hold";
         } else if (isActivelyCharging) {
             batState = @"Charging";
-        } else if ((notChargingReason & (1 << 24)) != 0) {
-            batState = @"On Hold";
         } else {
             batState = @"Standby";
         }
