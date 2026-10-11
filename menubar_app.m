@@ -308,7 +308,6 @@ static void powerSourceNotificationCallback(void *context) {
 
     // 2. Read AppleRawAdapterDetails for the actively connected adapter (cleared by macOS when unplugged)
     int rawWatts = 0;
-    int rawMenuMaxW = 0;
     CFArrayRef rawAdapters = (CFArrayRef)IORegistryEntryCreateCFProperty(service, SEC_CFSTR(AppleRawAdapterDetails), kCFAllocatorDefault, 0);
     if (rawAdapters && CFGetTypeID(rawAdapters) == CFArrayGetTypeID() && CFArrayGetCount(rawAdapters) > 0) {
         CFDictionaryRef firstAd = (CFDictionaryRef)CFArrayGetValueAtIndex(rawAdapters, 0);
@@ -317,30 +316,24 @@ static void powerSourceNotificationCallback(void *context) {
             if (rwNum && CFGetTypeID(rwNum) == CFNumberGetTypeID()) {
                 CFNumberGetValue(rwNum, kCFNumberIntType, &rawWatts);
             }
-            CFNumberRef pmuNum = (CFNumberRef)CFDictionaryGetValue(firstAd, SEC_CFSTR(PMUConfiguration));
-            if (pmuNum && CFGetTypeID(pmuNum) == CFNumberGetTypeID()) {
-                int pmuVal = 0;
-                CFNumberGetValue(pmuNum, kCFNumberIntType, &pmuVal);
-                if (pmuVal > 0 && rawWatts <= 0) {
-                    rawWatts = (int)round((double)pmuVal / 1000.0);
+            if (rawWatts <= 0) {
+                CFNumberRef vNum = (CFNumberRef)CFDictionaryGetValue(firstAd, SEC_CFSTR(AdapterVoltage));
+                CFNumberRef cNum = (CFNumberRef)CFDictionaryGetValue(firstAd, SEC_CFSTR(Current));
+                if (vNum && cNum) {
+                    int64_t vVal = 0, cVal = 0;
+                    CFNumberGetValue((CFNumberRef)vNum, kCFNumberSInt64Type, &vVal);
+                    CFNumberGetValue((CFNumberRef)cNum, kCFNumberSInt64Type, &cVal);
+                    if (vVal > 0 && cVal > 0) {
+                        rawWatts = (int)round(((double)vVal * (double)cVal) / 1000000.0);
+                    }
                 }
             }
-            CFArrayRef hvcMenu = (CFArrayRef)CFDictionaryGetValue(firstAd, SEC_CFSTR(UsbHvcMenu));
-            if (hvcMenu && CFGetTypeID(hvcMenu) == CFArrayGetTypeID()) {
-                CFIndex mCount = CFArrayGetCount(hvcMenu);
-                for (CFIndex m = 0; m < mCount; m++) {
-                    CFDictionaryRef mItem = (CFDictionaryRef)CFArrayGetValueAtIndex(hvcMenu, m);
-                    if (mItem && CFGetTypeID(mItem) == CFDictionaryGetTypeID()) {
-                        CFNumberRef vNum = (CFNumberRef)CFDictionaryGetValue(mItem, SEC_CFSTR(MaxVoltage));
-                        CFNumberRef cNum = (CFNumberRef)CFDictionaryGetValue(mItem, SEC_CFSTR(MaxCurrent));
-                        if (vNum && cNum) {
-                            int mv = 0, ma = 0;
-                            CFNumberGetValue(vNum, kCFNumberIntType, &mv);
-                            CFNumberGetValue(cNum, kCFNumberIntType, &ma);
-                            int mw = (int)round(((double)mv * (double)ma) / 1000000.0);
-                            if (mw > rawMenuMaxW) rawMenuMaxW = mw;
-                        }
-                    }
+            CFNumberRef pmuNum = (CFNumberRef)CFDictionaryGetValue(firstAd, SEC_CFSTR(PMUConfiguration));
+            if (pmuNum && CFGetTypeID(pmuNum) == CFNumberGetTypeID() && rawWatts <= 0) {
+                int pmuVal = 0;
+                CFNumberGetValue(pmuNum, kCFNumberIntType, &pmuVal);
+                if (pmuVal > 0) {
+                    rawWatts = (int)round((double)pmuVal / 1000.0);
                 }
             }
         }
@@ -377,7 +370,6 @@ static void powerSourceNotificationCallback(void *context) {
 
     // 4. Query physical USB-C Port Controllers for actively connected port PDOs
     CFArrayRef portInfo = (CFArrayRef)IORegistryEntryCreateCFProperty(service, SEC_CFSTR(PortControllerInfo), kCFAllocatorDefault, 0);
-    int portPdoMaxW = 0;
     if (portInfo && CFGetTypeID(portInfo) == CFArrayGetTypeID()) {
         CFIndex portCount = CFArrayGetCount(portInfo);
 
@@ -420,11 +412,7 @@ static void powerSourceNotificationCallback(void *context) {
             }
         }
 
-        if (connectedPortIdx < 0) {
-            connectedPortIdx = 0;
-        }
-
-        // Strictly only parse if a port is physically attached (attach > detach)
+        // Strictly only inspect PDOs if a port was positively identified as physically attached
         if (connectedPortIdx >= 0 && (CFIndex)connectedPortIdx < portCount) {
             CFDictionaryRef pDict = (CFDictionaryRef)CFArrayGetValueAtIndex(portInfo, connectedPortIdx);
             if (pDict && CFGetTypeID(pDict) == CFDictionaryGetTypeID()) {
@@ -443,27 +431,10 @@ static void powerSourceNotificationCallback(void *context) {
                             uint32_t u = (uint32_t)(pdoVal & 0xFFFFFFFF);
                             int pwrType = (int)((u >> 30) & 0x3);
                             if (pwrType == 0) { // Fixed supply PDO
-                                double v = ((double)((u >> 10) & 0x3FF)) * 0.05;
-                                double c = ((double)(u & 0x3FF)) * 0.01;
-                                int w = (int)round(v * c);
                                 if ((u >> 29) & 1) detectedDRP = YES;
                                 if ((u >> 27) & 1) detectedUnconstrained = YES;
-                                if (w > portPdoMaxW) portPdoMaxW = w;
                             } else if (pwrType == 1) { // Battery PDO
                                 detectedBatterySupply = YES;
-                                double mw = ((double)(u & 0x3FF)) * 0.25;
-                                int w = (int)round(mw);
-                                if (w > portPdoMaxW) portPdoMaxW = w;
-                            } else if (pwrType == 2) { // Variable supply PDO
-                                double vMax = ((double)((u >> 20) & 0x3FF)) * 0.05;
-                                double c = ((double)(u & 0x3FF)) * 0.01;
-                                int w = (int)round(vMax * c);
-                                if (w > portPdoMaxW) portPdoMaxW = w;
-                            } else if (pwrType == 3) { // PPS / APDO
-                                double vMax = ((double)((u >> 17) & 0xFF)) * 0.1;
-                                double c = ((double)(u & 0x7F)) * 0.05;
-                                int w = (int)round(vMax * c);
-                                if (w > portPdoMaxW) portPdoMaxW = w;
                             }
                         }
                     }
@@ -475,13 +446,9 @@ static void powerSourceNotificationCallback(void *context) {
     (void)detectedUnconstrained;
 
     // Determine Rated Capacity (Yellow Text):
-    // Strictly prioritize the actual attached charger/power bank negotiated wattage
+    // Strictly prioritize the actual attached charger/power bank negotiated wattage from kernel powerd
     int rated = 0;
-    if (rawMenuMaxW > 0) {
-        rated = rawMenuMaxW;
-    } else if (portPdoMaxW > 0) {
-        rated = portPdoMaxW;
-    } else if (adapterWatts > 0) {
+    if (adapterWatts > 0) {
         rated = adapterWatts;
     } else if (rawWatts > 0) {
         rated = rawWatts;
@@ -625,35 +592,6 @@ static void powerSourceNotificationCallback(void *context) {
     }
     *outNotChargingReason = notChargingReason;
 
-    double pmuWatts = 0.0;
-    BOOL isHoldLimited = ((notChargingReason & (1 << 24)) != 0);
-    if (v > 0 && pmuConfigured > 0 && !isHoldLimited) {
-        pmuWatts = ((double)v * (double)pmuConfigured) / 1000000.0;
-    }
-
-    // Read PowerDistribution target negotiated by PMU
-    int ipdWattageOverride = 0;
-    CFDictionaryRef pwrDist = (CFDictionaryRef)IORegistryEntryCreateCFProperty(service, SEC_CFSTR(PowerDistribution), kCFAllocatorDefault, 0);
-    if (pwrDist && CFGetTypeID(pwrDist) == CFDictionaryGetTypeID()) {
-        CFNumberRef ipdNum = (CFNumberRef)CFDictionaryGetValue(pwrDist, SEC_CFSTR(IPDWattageOverride));
-        if (ipdNum && CFGetTypeID(ipdNum) == CFNumberGetTypeID()) {
-            CFNumberGetValue(ipdNum, kCFNumberIntType, &ipdWattageOverride);
-        }
-        CFRelease(pwrDist);
-    }
-
-    double targetChargeWatts = 0.0;
-    if (ipdWattageOverride > 0) {
-        targetChargeWatts = ((double)ipdWattageOverride / 1000.0) * 0.92;
-    } else if (pmuWatts > 0.0) {
-        targetChargeWatts = pmuWatts * 0.75;
-    } else if (*outRatedWatts > 0) {
-        targetChargeWatts = MIN(30.0, (double)*outRatedWatts) * 0.92;
-    }
-    if (*outRatedWatts > 0 && targetChargeWatts > (double)*outRatedWatts) {
-        targetChargeWatts = (double)*outRatedWatts * 0.92;
-    }
-
     // Live system load & telemetry from PMU
     double sysLoad = 0.0;
     double sysPwrIn = 0.0;
@@ -690,35 +628,23 @@ static void powerSourceNotificationCallback(void *context) {
     }
 
     // Accurate Live Power Draw (Green Text):
-    // 1. Direct steady-state PMU wall telemetry (sysPwrIn >= 10.0W)
-    // 2. Instantaneous Coulomb counter ADC + system load (instantTotal >= 10.0W)
-    // 3. Sub-second negotiated charging profile (targetChargeWatts) during macOS 30s AC inrush qualification timer
+    // 100% Genuine Physical Hardware Telemetry (No Hardcoded Overrides)
     double liveWatts = 0.0;
     double loadWatts = (sysLoad > 0.0 && sysLoad < 50.0) ? sysLoad : 5.0;
 
-    double instantTotal = 0.0;
-    if (*outBatteryWatts > 0.0) {
-        instantTotal = *outBatteryWatts + loadWatts;
-    }
-
-    if (sysPwrIn >= 10.0) {
-        // Direct steady-state PMU wall telemetry
-        liveWatts = sysPwrIn;
-    } else if (instantTotal >= 10.0) {
-        // Active Coulomb counter charging measurement
-        liveWatts = MAX(instantTotal, sysPwrIn);
-    } else if (isConnected && targetChargeWatts > 0.0 && (*outBatteryPct < 100)) {
-        // Instant response (< 200ms) during macOS 30-second AC qualification period
-        liveWatts = targetChargeWatts;
-    } else if (instantTotal > 0.0) {
-        liveWatts = instantTotal;
-    } else if (sysPwrIn > 0.0) {
+    if (sysPwrIn > 0.0) {
+        // Direct physical wall power telemetry measured by PMU input shunt
         liveWatts = sysPwrIn;
     } else if (*outInputVolts > 0.0 && *outInputAmps > 0.0) {
+        // Direct physical calculation from measured input voltage & amperage
         liveWatts = (*outInputVolts) * (*outInputAmps);
-    } else if (isConnected) {
-        // Connected to AC, but battery is not charging (e.g. 100% full or Reason 128 hold)
-        liveWatts = loadWatts;
+    } else if (*outBatteryWatts > 0.0) {
+        // Active Coulomb counter charging measurement + internal system load
+        liveWatts = *outBatteryWatts + loadWatts;
+    } else if (isConnected && (*outBatteryPct >= 100 || notChargingReason != 0)) {
+        // Connected to AC, but battery not charging (e.g. 100% full or charge hold):
+        // laptop consumes its idle/workload power from AC
+        liveWatts = (sysLoad > 0.0 && sysLoad < 50.0) ? sysLoad : 0.0;
     } else {
         liveWatts = 0.0;
     }
@@ -913,7 +839,8 @@ static void powerSourceNotificationCallback(void *context) {
             } else {
                 type = brand.length > 0 ? [NSString stringWithFormat:@"%@ Power Adapter", brand] : @"Power Adapter";
             }
-            if (isCharging || (actualWatts >= 5.0 && batteryPct < 100)) {
+            BOOL isActivelyCharging = (isCharging || batteryWatts > 0.0 || (actualWatts > 1.0 && batteryPct < 100 && notChargingReason == 0));
+            if (isActivelyCharging) {
                 self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: %d W\nBattery: Charging (%d%%)\nSource: %@ (Max %d W)", (int)round(actualWatts), batteryPct, type, ratedWatts];
             } else if (fullyCharged || batteryPct >= 100) {
                 self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: %d W (Idle Draw)\nBattery: Fully Charged (%d%%)\nSource: %@ (Max %d W)", (int)round(actualWatts), batteryPct, type, ratedWatts];
@@ -1031,10 +958,12 @@ static void powerSourceNotificationCallback(void *context) {
         [drawItem setEnabled:NO];
         [menu addItem:drawItem];
 
+        BOOL isActivelyCharging = (isCharging || batteryWatts > 0.0 || (actualWatts > 1.0 && batteryPct < 100 && notChargingReason == 0));
+
         NSString *batChgStr;
         if (batteryWatts > 0.0) {
             batChgStr = [NSString stringWithFormat:@"Battery Charging Rate: %.1f W", batteryWatts];
-        } else if (actualWatts >= 5.0 && batteryPct < 100) {
+        } else if (isActivelyCharging && actualWatts > 0.0) {
             batChgStr = [NSString stringWithFormat:@"Battery Charging Rate: %d W", (int)round(actualWatts)];
         } else if (fullyCharged || batteryPct >= 100) {
             batChgStr = @"Battery Charging: Fully Charged";
@@ -1054,7 +983,7 @@ static void powerSourceNotificationCallback(void *context) {
         NSString *batState;
         if (fullyCharged || batteryPct >= 100) {
             batState = @"Fully Charged";
-        } else if (isCharging || (actualWatts >= 5.0 && batteryPct < 100)) {
+        } else if (isActivelyCharging) {
             batState = @"Charging";
         } else if ((notChargingReason & (1 << 24)) != 0) {
             batState = @"On Hold";
@@ -1070,7 +999,7 @@ static void powerSourceNotificationCallback(void *context) {
         NSString *timeStr = nil;
         if (fullyCharged || batteryPct >= 100) {
             timeStr = @"Fully Charged";
-        } else if (isCharging || (actualWatts >= 5.0 && batteryPct < 100) || timeToFull > 0) {
+        } else if (isActivelyCharging || timeToFull > 0) {
             if (timeToFull > 0 && timeToFull < 65535) {
                 if (timeToFull >= 60) {
                     int hrs = timeToFull / 60;
