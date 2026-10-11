@@ -240,28 +240,11 @@ static void powerSourceNotificationCallback(void *context) {
         CFNumberGetValue((CFNumberRef)curCap, kCFNumberIntType, outBatteryPct);
     }
 
-    // Read FedDetails and PowerTelemetry to detect physical hardware connection even before kernel PDO latch
-    BOOL fedConn = NO;
-    CFArrayRef earlyFed = (CFArrayRef)IORegistryEntryCreateCFProperty(service, SEC_CFSTR(FedDetails), kCFAllocatorDefault, 0);
-    if (earlyFed && CFGetTypeID(earlyFed) == CFArrayGetTypeID()) {
-        CFIndex fedCount = CFArrayGetCount(earlyFed);
-        for (CFIndex i = 0; i < fedCount; i++) {
-            CFDictionaryRef fDict = (CFDictionaryRef)CFArrayGetValueAtIndex(earlyFed, i);
-            if (fDict && CFGetTypeID(fDict) == CFDictionaryGetTypeID()) {
-                CFNumberRef fConn = (CFNumberRef)CFDictionaryGetValue(fDict, SEC_CFSTR(FedExternalConnected));
-                if (fConn && CFGetTypeID(fConn) == CFNumberGetTypeID()) {
-                    int val = 0;
-                    CFNumberGetValue(fConn, kCFNumberIntType, &val);
-                    if (val > 0) {
-                        fedConn = YES;
-                        break;
-                    }
-                }
-            }
-        }
-        CFRelease(earlyFed);
-    }
+    // Check genuine external power connection:
+    // 1. Kernel PowerManagement ExternalConnected flags
+    BOOL isConnected = (extConn == kCFBooleanTrue || rawExtConn == kCFBooleanTrue);
 
+    // 2. Physical incoming electrical power on PMU shunt (VBUS >= 3.5V or Power >= 0.5W)
     BOOL pwrInPresent = NO;
     CFDictionaryRef earlyTelem = (CFDictionaryRef)IORegistryEntryCreateCFProperty(service, SEC_CFSTR(PowerTelemetryData), kCFAllocatorDefault, 0);
     if (earlyTelem && CFGetTypeID(earlyTelem) == CFDictionaryGetTypeID()) {
@@ -270,41 +253,42 @@ static void powerSourceNotificationCallback(void *context) {
         if (vIn && CFGetTypeID(vIn) == CFNumberGetTypeID()) {
             double v = 0;
             CFNumberGetValue(vIn, kCFNumberDoubleType, &v);
-            if (v > 1000.0) pwrInPresent = YES;
+            if (v >= 3500.0) pwrInPresent = YES; // >= 3.5V physical incoming VBUS
         }
         if (pIn && CFGetTypeID(pIn) == CFNumberGetTypeID()) {
             double p = 0;
             CFNumberGetValue(pIn, kCFNumberDoubleType, &p);
-            if (p > 100.0) pwrInPresent = YES;
+            if (p >= 500.0) pwrInPresent = YES; // >= 0.5W incoming wall power
         }
         CFRelease(earlyTelem);
     }
 
-    BOOL portAttached = NO;
-    CFArrayRef earlyPort = (CFArrayRef)IORegistryEntryCreateCFProperty(service, SEC_CFSTR(PortControllerInfo), kCFAllocatorDefault, 0);
-    if (earlyPort && CFGetTypeID(earlyPort) == CFArrayGetTypeID()) {
-        CFIndex pCount = CFArrayGetCount(earlyPort);
-        for (CFIndex i = 0; i < pCount; i++) {
-            CFDictionaryRef pDict = (CFDictionaryRef)CFArrayGetValueAtIndex(earlyPort, i);
-            if (pDict && CFGetTypeID(pDict) == CFDictionaryGetTypeID()) {
-                int npdo = 0, attach = 0, detach = 0;
-                CFNumberRef npNum = (CFNumberRef)CFDictionaryGetValue(pDict, SEC_CFSTR(PortControllerNPDOs));
-                CFNumberRef attNum = (CFNumberRef)CFDictionaryGetValue(pDict, SEC_CFSTR(PortControllerAttachCount));
-                CFNumberRef detNum = (CFNumberRef)CFDictionaryGetValue(pDict, SEC_CFSTR(PortControllerDetachCount));
-                if (npNum && CFGetTypeID(npNum) == CFNumberGetTypeID()) CFNumberGetValue(npNum, kCFNumberIntType, &npdo);
-                if (attNum && CFGetTypeID(attNum) == CFNumberGetTypeID()) CFNumberGetValue(attNum, kCFNumberIntType, &attach);
-                if (detNum && CFGetTypeID(detNum) == CFNumberGetTypeID()) CFNumberGetValue(detNum, kCFNumberIntType, &detach);
-                if (npdo > 0 || attach > detach) {
-                    portAttached = YES;
-                    break;
-                }
+    // 3. Active hardware adapter registered in AppleRawAdapterDetails
+    BOOL adapterPresent = NO;
+    CFArrayRef rawAdaptersEarly = (CFArrayRef)IORegistryEntryCreateCFProperty(service, SEC_CFSTR(AppleRawAdapterDetails), kCFAllocatorDefault, 0);
+    if (rawAdaptersEarly && CFGetTypeID(rawAdaptersEarly) == CFArrayGetTypeID()) {
+        if (CFArrayGetCount(rawAdaptersEarly) > 0) {
+            CFDictionaryRef firstAd = (CFDictionaryRef)CFArrayGetValueAtIndex(rawAdaptersEarly, 0);
+            if (firstAd && CFGetTypeID(firstAd) == CFDictionaryGetTypeID()) {
+                CFNumberRef wNum = (CFNumberRef)CFDictionaryGetValue(firstAd, SEC_CFSTR(Watts));
+                int w = 0;
+                if (wNum && CFGetTypeID(wNum) == CFNumberGetTypeID()) CFNumberGetValue(wNum, kCFNumberIntType, &w);
+                if (w > 0) adapterPresent = YES;
             }
         }
-        CFRelease(earlyPort);
+        CFRelease(rawAdaptersEarly);
     }
 
-    // Determine connection state:
-    BOOL isConnected = (extConn == kCFBooleanTrue || rawExtConn == kCFBooleanTrue || fedConn || pwrInPresent || portAttached);
+    // 4. IOPowerSources external adapter description
+    CFDictionaryRef iopsEarly = IOPSCopyExternalPowerAdapterDetails();
+    if (iopsEarly) {
+        adapterPresent = YES;
+        CFRelease(iopsEarly);
+    }
+
+    if (extConn == kCFBooleanTrue || rawExtConn == kCFBooleanTrue || pwrInPresent || adapterPresent) {
+        isConnected = YES;
+    }
     if (!isConnected) {
         *outConnected = NO;
         *outRatedWatts = 0;
