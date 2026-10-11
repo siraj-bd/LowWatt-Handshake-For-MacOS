@@ -986,9 +986,19 @@ static void powerSourceNotificationCallback(void *context) {
         [self startFastBurstPoll];
     }
 
+    // Fast UI Response Bridge (Outside Presentation Layer):
+    // If connected to a rated charger/powerbank but PMU hardware shunt is still in its 3-5s integration window,
+    // immediately latch the initial active power draw so the UI green text responds instantly (< 100ms).
+    double uiWatts = actualWatts;
+    if (connected && ratedWatts > 0 && uiWatts <= 0.0 && !fullyCharged) {
+        double baselineLoad = (inputVolts > 0.0 && inputAmps > 0.0) ? (inputVolts * inputAmps) : 5.0;
+        double initialEstimate = (double)ratedWatts * 0.82;
+        uiWatts = MIN((double)ratedWatts, MAX(baselineLoad, initialEstimate));
+    }
+
     // Render custom 3D battery widget
     NSImage *batteryIcon = [self generateBatteryIconWithConnected:connected 
-                                                      actualWatts:actualWatts 
+                                                      actualWatts:uiWatts 
                                                        ratedWatts:ratedWatts];
 
     if (self.statusItem.button) {
@@ -1004,17 +1014,17 @@ static void powerSourceNotificationCallback(void *context) {
                 type = brand.length > 0 ? [NSString stringWithFormat:@"%@ Power Adapter", brand] : @"Power Adapter";
             }
             BOOL isHoldLimited = ((notChargingReason & (1 << 24)) != 0);
-            BOOL isActivelyCharging = (!isHoldLimited && !fullyCharged && batteryPct < 100 && (isCharging || batteryWatts > 0.0 || actualWatts > 0.0));
+            BOOL isActivelyCharging = (!isHoldLimited && !fullyCharged && batteryPct < 100 && (isCharging || batteryWatts > 0.0 || uiWatts > 0.0));
             if (isActivelyCharging) {
-                self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: %d W\nBattery: Charging (%d%%)\nSource: %@ (Max %d W)", (int)round(actualWatts), batteryPct, type, ratedWatts];
+                self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: %d W\nBattery: Charging (%d%%)\nSource: %@ (Max %d W)", (int)round(uiWatts), batteryPct, type, ratedWatts];
             } else if (fullyCharged || batteryPct >= 100) {
-                self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: %d W (Idle Draw)\nBattery: Fully Charged (%d%%)\nSource: %@ (Max %d W)", (int)round(actualWatts), batteryPct, type, ratedWatts];
+                self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: %d W (Idle Draw)\nBattery: Fully Charged (%d%%)\nSource: %@ (Max %d W)", (int)round(uiWatts), batteryPct, type, ratedWatts];
             } else if (isHoldLimited) {
-                self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: %d W (Idle Draw)\nBattery Charging: Paused (Charge Limit Hold at %d%%)\nSource: %@ (Max %d W)", (int)round(actualWatts), batteryPct, type, ratedWatts];
-            } else if (actualWatts <= 0.0 && ratedWatts <= 0) {
+                self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: %d W (Idle Draw)\nBattery Charging: Paused (Charge Limit Hold at %d%%)\nSource: %@ (Max %d W)", (int)round(uiWatts), batteryPct, type, ratedWatts];
+            } else if (uiWatts <= 0.0 && ratedWatts <= 0) {
                 self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: Standby / Negotiation Pending\nSource: %@\nClick 'Force Handshake Kickstart' to wake power handshake", type];
             } else {
-                self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: %d W (Max %d W)\nSource: %@", (int)round(actualWatts), ratedWatts, type];
+                self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: %d W (Max %d W)\nSource: %@", (int)round(uiWatts), ratedWatts, type];
             }
         } else {
             self.statusItem.button.toolTip = @"LowWatt Handshake: Disconnected";
@@ -1036,7 +1046,7 @@ static void powerSourceNotificationCallback(void *context) {
                                 isAnker:isAnker 
                                   brand:brand
                              ratedWatts:ratedWatts 
-                            actualWatts:actualWatts 
+                            actualWatts:uiWatts 
                            batteryWatts:batteryWatts 
                              inputVolts:inputVolts 
                               inputAmps:inputAmps 
