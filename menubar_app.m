@@ -1349,7 +1349,7 @@ static void powerSourceNotificationCallback(void *context) {
 }
 
 - (void)openPurchasePage {
-    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://github.com/siraj-bd/LowWatt-Handshake-For-MacOS#pricing-plans"]];
+    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://github.com/siraj-bd/LowWatt-Handshake-For-MacOS#-pricing--licensing-plans"]];
 }
 
 - (void)showTrialExpiredDialog {
