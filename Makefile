@@ -19,12 +19,13 @@ app: menubar_app.m security_obfuscation.h Info.plist
 	cp Info.plist $(APP_BUNDLE)/Contents/Info.plist
 	cp battery_connected_base.png $(APP_BUNDLE)/Contents/Resources/
 	cp battery_disconnected_base.png $(APP_BUNDLE)/Contents/Resources/
-	cp AppIcon.icns $(APP_BUNDLE)/Contents/Resources/ 2>/dev/null || true
+	cp AppIcon.icns $(APP_BUNDLE)/Contents/Resources/
 
 dmg: app
 	rm -rf dmg_root $(DMG_NAME)
 	mkdir -p dmg_root
 	cp -r $(APP_BUNDLE) dmg_root/
+	ln -s /Applications dmg_root/Applications
 	hdiutil create -volname "$(APP_NAME)" -srcfolder dmg_root -ov -format UDZO "$(DMG_NAME)"
 	rm -rf dmg_root
 
