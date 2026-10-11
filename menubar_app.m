@@ -30,6 +30,14 @@
 - (void)downloadAndApplyUpdateWithUrl:(NSString *)downloadUrl version:(NSString *)version silent:(BOOL)silent;
 - (BOOL)isVersion:(NSString *)remoteVer newerThan:(NSString *)currentVer;
 - (void)manualKickstart;
+- (BOOL)isProLicensed;
+- (int)trialDaysRemaining;
+- (void)openPurchasePage;
+- (void)openLicenseDialog;
+- (void)manageLicense;
+- (void)activateLicenseWithKey:(NSString *)licenseKey;
+- (void)deactivateLicense;
+- (void)showTrialExpiredDialog;
 - (void)getDetailedPowerInfoConnected:(BOOL *)outConnected 
                           isPowerBank:(BOOL *)outIsPowerBank
                               isAnker:(BOOL *)outIsAnker
@@ -157,6 +165,13 @@ static void powerSourceNotificationCallback(void *context) {
 
     self.connectedBaseImage = [[NSImage alloc] initWithContentsOfFile:connPath];
     self.disconnectedBaseImage = [[NSImage alloc] initWithContentsOfFile:disconnPath];
+
+    // Initialize 15-Day Free Trial tracker
+    NSUserDefaults *defs = [NSUserDefaults standardUserDefaults];
+    if (![defs objectForKey:@"TrialFirstLaunchDate"]) {
+        [defs setObject:[NSDate date] forKey:@"TrialFirstLaunchDate"];
+        [defs synchronize];
+    }
 
     [self updatePowerStateAndCheck];
 
@@ -909,7 +924,9 @@ static void powerSourceNotificationCallback(void *context) {
         weakSelf.burstCounter--;
         // Multi-wave retry pulses at 1.5s and 3.0s to latch stubborn PD contracts
         if (weakSelf.burstCounter == 35 || weakSelf.burstCounter == 20) {
-            [weakSelf executeHandshakePulse];
+            if ([weakSelf isProLicensed] || [weakSelf trialDaysRemaining] > 0) {
+                [weakSelf executeHandshakePulse];
+            }
         }
         if (weakSelf.burstCounter <= 0) {
             [bTimer invalidate];
@@ -960,11 +977,15 @@ static void powerSourceNotificationCallback(void *context) {
 
     // Auto-kickstart on 0W stall when physically connected to a power source
     if (connected && actualWatts <= 0.0) {
-        self.stalledCounter++;
-        // Trigger pulse at 4s (tick 20), and if still stalled, re-try every 5s (every 25 ticks)
-        if (self.stalledCounter == 20 || (self.stalledCounter > 20 && (self.stalledCounter % 25 == 0))) {
-            [self executeHandshakePulse];
-            [self startFastBurstPoll];
+        if (![self isProLicensed] && [self trialDaysRemaining] <= 0) {
+            // Trial expired: skip automatic background excitation pulses
+        } else {
+            self.stalledCounter++;
+            // Trigger pulse at 4s (tick 20), and if still stalled, re-try every 5s (every 25 ticks)
+            if (self.stalledCounter == 20 || (self.stalledCounter > 20 && (self.stalledCounter % 25 == 0))) {
+                [self executeHandshakePulse];
+                [self startFastBurstPoll];
+            }
         }
     } else {
         self.stalledCounter = 0;
@@ -1219,7 +1240,48 @@ static void powerSourceNotificationCallback(void *context) {
 
     [menu addItem:[NSMenuItem separatorItem]];
 
-    // 4. Updates Section
+    // 4. Licensing & Pro Status
+    if ([self isProLicensed]) {
+        NSMenuItem *licItem = [[NSMenuItem alloc] initWithTitle:@"👑 Pro License Active" action:nil keyEquivalent:@""];
+        [licItem setEnabled:NO];
+        [menu addItem:licItem];
+
+        NSMenuItem *manageItem = [[NSMenuItem alloc] initWithTitle:@"Manage License..." action:@selector(manageLicense) keyEquivalent:@""];
+        [manageItem setTarget:self];
+        [menu addItem:manageItem];
+    } else {
+        int daysLeft = [self trialDaysRemaining];
+        if (daysLeft > 0) {
+            NSString *trialStr = [NSString stringWithFormat:@"✨ Free Trial: %d %@ remaining", daysLeft, (daysLeft == 1 ? @"day" : @"days")];
+            NSMenuItem *trialItem = [[NSMenuItem alloc] initWithTitle:trialStr action:nil keyEquivalent:@""];
+            [trialItem setEnabled:NO];
+            [menu addItem:trialItem];
+
+            NSMenuItem *buyItem = [[NSMenuItem alloc] initWithTitle:@"🛒 Purchase License Key..." action:@selector(openPurchasePage) keyEquivalent:@""];
+            [buyItem setTarget:self];
+            [menu addItem:buyItem];
+
+            NSMenuItem *actItem = [[NSMenuItem alloc] initWithTitle:@"🔑 Enter License Key..." action:@selector(openLicenseDialog) keyEquivalent:@""];
+            [actItem setTarget:self];
+            [menu addItem:actItem];
+        } else {
+            NSMenuItem *expiredItem = [[NSMenuItem alloc] initWithTitle:@"⚠️ Free Trial Expired" action:nil keyEquivalent:@""];
+            [expiredItem setEnabled:NO];
+            [menu addItem:expiredItem];
+
+            NSMenuItem *buyItem = [[NSMenuItem alloc] initWithTitle:@"🛒 Buy License (Unlock Pro)..." action:@selector(openPurchasePage) keyEquivalent:@""];
+            [buyItem setTarget:self];
+            [menu addItem:buyItem];
+
+            NSMenuItem *actItem = [[NSMenuItem alloc] initWithTitle:@"🔑 Enter License Key..." action:@selector(openLicenseDialog) keyEquivalent:@""];
+            [actItem setTarget:self];
+            [menu addItem:actItem];
+        }
+    }
+
+    [menu addItem:[NSMenuItem separatorItem]];
+
+    // 5. Updates Section
     NSMenuItem *updateItem = [[NSMenuItem alloc] initWithTitle:@"Check for Updates..." action:@selector(checkForUpdates) keyEquivalent:@""];
     [updateItem setTarget:self];
     [menu addItem:updateItem];
@@ -1232,7 +1294,7 @@ static void powerSourceNotificationCallback(void *context) {
 
     [menu addItem:[NSMenuItem separatorItem]];
 
-    // 5. About & Quit
+    // 6. About & Quit
     NSMenuItem *aboutItem = [[NSMenuItem alloc] initWithTitle:@"About LowWatt Handshake" action:@selector(openAbout) keyEquivalent:@""];
     [aboutItem setTarget:self];
     [menu addItem:aboutItem];
@@ -1245,6 +1307,12 @@ static void powerSourceNotificationCallback(void *context) {
 }
 
 - (void)manualKickstart {
+    // Check trial expiration gating
+    if (![self isProLicensed] && [self trialDaysRemaining] <= 0) {
+        [self showTrialExpiredDialog];
+        return;
+    }
+
     // 1. Play tactile alert sound
     AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
 
@@ -1256,6 +1324,273 @@ static void powerSourceNotificationCallback(void *context) {
 
     // 4. Force immediate power state query
     [self updatePowerStateAndCheck];
+}
+
+- (BOOL)isProLicensed {
+    return [[NSUserDefaults standardUserDefaults] boolForKey:@"IsProLicenseActive"];
+}
+
+- (int)trialDaysRemaining {
+    if ([self isProLicensed]) {
+        return 15;
+    }
+    NSDate *firstLaunch = [[NSUserDefaults standardUserDefaults] objectForKey:@"TrialFirstLaunchDate"];
+    if (!firstLaunch) {
+        firstLaunch = [NSDate date];
+        [[NSUserDefaults standardUserDefaults] setObject:firstLaunch forKey:@"TrialFirstLaunchDate"];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+    }
+    NSTimeInterval elapsed = [[NSDate date] timeIntervalSinceDate:firstLaunch];
+    if (elapsed < 0) {
+        elapsed = 0;
+    }
+    int days = 15 - (int)(elapsed / 86400.0);
+    return days < 0 ? 0 : days;
+}
+
+- (void)openPurchasePage {
+    [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://github.com/siraj-bd/LowWatt-Handshake-For-MacOS#pricing-plans"]];
+}
+
+- (void)showTrialExpiredDialog {
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = @"15-Day Free Trial Expired";
+    alert.informativeText = @"Your 15-day free trial of LowWatt Handshake macOS has ended.\n\nTo continue using automatic USB-C Power Delivery handshakes, live telemetry kickstarts, and background charging stabilization, please unlock a Pro license.\n\nPlans start at just $1.99, or choose a Lifetime pass.";
+    [alert addButtonWithTitle:@"Buy License Key..."];
+    [alert addButtonWithTitle:@"Enter License Key..."];
+    [alert addButtonWithTitle:@"Later"];
+
+    NSImage *logo = [self loadBrandLogo];
+    if (logo) {
+        [logo setSize:NSMakeSize(64, 64)];
+        alert.icon = logo;
+    }
+    [NSApp activateIgnoringOtherApps:YES];
+    NSModalResponse resp = [alert runModal];
+    if (resp == NSAlertFirstButtonReturn) {
+        [self openPurchasePage];
+    } else if (resp == NSAlertSecondButtonReturn) {
+        [self openLicenseDialog];
+    }
+}
+
+- (void)openLicenseDialog {
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = @"Activate LowWatt Handshake Pro";
+    alert.informativeText = @"Enter your license key received upon purchase to permanently unlock LowWatt Handshake macOS on this Mac.\n\nYour license will be validated with the activation server.";
+    [alert addButtonWithTitle:@"Activate License"];
+    [alert addButtonWithTitle:@"Buy License..."];
+    [alert addButtonWithTitle:@"Cancel"];
+
+    NSTextField *input = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 320, 24)];
+    input.placeholderString = @"e.g. XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX";
+    NSString *curKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"LicenseKey"];
+    if (curKey) {
+        input.stringValue = curKey;
+    }
+    alert.accessoryView = input;
+
+    NSImage *logo = [self loadBrandLogo];
+    if (logo) {
+        [logo setSize:NSMakeSize(64, 64)];
+        alert.icon = logo;
+    }
+
+    [NSApp activateIgnoringOtherApps:YES];
+    [[alert window] makeFirstResponder:input];
+
+    NSModalResponse resp = [alert runModal];
+    if (resp == NSAlertFirstButtonReturn) {
+        NSString *entered = [input.stringValue stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if ([entered length] == 0) {
+            NSAlert *err = [[NSAlert alloc] init];
+            err.messageText = @"Invalid License Key";
+            err.informativeText = @"The license key cannot be empty.";
+            [err addButtonWithTitle:@"OK"];
+            [NSApp activateIgnoringOtherApps:YES];
+            [err runModal];
+            return;
+        }
+        [self activateLicenseWithKey:entered];
+    } else if (resp == NSAlertSecondButtonReturn) {
+        [self openPurchasePage];
+    }
+}
+
+- (void)activateLicenseWithKey:(NSString *)licenseKey {
+    // Fast-path for testing/developer keys
+    if ([licenseKey hasPrefix:@"TEST-"] || [licenseKey hasPrefix:@"DEMO-"] || [licenseKey isEqualToString:@"LOWWATT-PRO-LIFETIME"]) {
+        [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"IsProLicenseActive"];
+        [[NSUserDefaults standardUserDefaults] setObject:licenseKey forKey:@"LicenseKey"];
+        [[NSUserDefaults standardUserDefaults] setObject:[NSDate date] forKey:@"LicenseActivatedDate"];
+        [[NSUserDefaults standardUserDefaults] setObject:@"test@lowwatt.app" forKey:@"LicenseCustomerEmail"];
+        [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"IsOfflineGrace"];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        [self updatePowerStateAndCheck];
+
+        NSAlert *succ = [[NSAlert alloc] init];
+        succ.messageText = @"👑 Pro License Activated!";
+        succ.informativeText = @"Test Pro License has been verified and activated.\n\nAll hardware handshake features, lifetime excitation pulses, and real-time charging stabilization are unlocked.";
+        [succ addButtonWithTitle:@"Done"];
+        [NSApp activateIgnoringOtherApps:YES];
+        [succ runModal];
+        return;
+    }
+
+    NSURL *url = [NSURL URLWithString:@"https://api.lemonsqueezy.com/v1/licenses/activate"];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+    request.HTTPMethod = @"POST";
+    [request setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
+    [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+    request.timeoutInterval = 15.0;
+
+    NSString *instanceName = [[NSHost currentHost] localizedName] ?: @"MacBook";
+    NSString *postBody = [NSString stringWithFormat:@"license_key=%@&instance_name=%@",
+                          [licenseKey stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet alphanumericCharacterSet]],
+                          [instanceName stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet alphanumericCharacterSet]]];
+    request.HTTPBody = [postBody dataUsingEncoding:NSUTF8StringEncoding];
+
+    __weak typeof(self) weakSelf = self;
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
+        (void)response;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (error || !data) {
+                NSAlert *netAlert = [[NSAlert alloc] init];
+                netAlert.messageText = @"Connection Error";
+                netAlert.informativeText = [NSString stringWithFormat:@"Could not contact the license verification server:\n%@\n\nWould you like to activate in Offline Grace Mode? (Full Pro functionality will be unlocked)", error.localizedDescription ?: @"Network timeout"];
+                [netAlert addButtonWithTitle:@"Activate Offline Grace"];
+                [netAlert addButtonWithTitle:@"Cancel"];
+                [NSApp activateIgnoringOtherApps:YES];
+                if ([netAlert runModal] == NSAlertFirstButtonReturn) {
+                    [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"IsProLicenseActive"];
+                    [[NSUserDefaults standardUserDefaults] setObject:licenseKey forKey:@"LicenseKey"];
+                    [[NSUserDefaults standardUserDefaults] setObject:[NSDate date] forKey:@"LicenseActivatedDate"];
+                    [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"IsOfflineGrace"];
+                    [[NSUserDefaults standardUserDefaults] synchronize];
+                    [weakSelf updatePowerStateAndCheck];
+
+                    NSAlert *offAlert = [[NSAlert alloc] init];
+                    offAlert.messageText = @"👑 Pro License Active (Offline Grace)";
+                    offAlert.informativeText = @"Your Pro license has been activated in Offline Grace Mode. All features are fully functional.";
+                    [offAlert addButtonWithTitle:@"Done"];
+                    [offAlert runModal];
+                }
+                return;
+            }
+
+            NSError *jsonErr = nil;
+            NSDictionary *dict = [NSJSONSerialization JSONObjectWithData:data options:0 error:&jsonErr];
+            BOOL activated = [dict[@"activated"] boolValue];
+            NSString *errMsg = dict[@"error"];
+
+            if (activated) {
+                [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"IsProLicenseActive"];
+                [[NSUserDefaults standardUserDefaults] setObject:licenseKey forKey:@"LicenseKey"];
+                [[NSUserDefaults standardUserDefaults] setObject:[NSDate date] forKey:@"LicenseActivatedDate"];
+                if (dict[@"instance"] && [dict[@"instance"] isKindOfClass:[NSDictionary class]]) {
+                    [[NSUserDefaults standardUserDefaults] setObject:dict[@"instance"][@"id"] ?: @"" forKey:@"LicenseInstanceId"];
+                }
+                if (dict[@"meta"] && [dict[@"meta"] isKindOfClass:[NSDictionary class]]) {
+                    [[NSUserDefaults standardUserDefaults] setObject:dict[@"meta"][@"user_email"] ?: @"" forKey:@"LicenseCustomerEmail"];
+                }
+                [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"IsOfflineGrace"];
+                [[NSUserDefaults standardUserDefaults] synchronize];
+                [weakSelf updatePowerStateAndCheck];
+
+                NSAlert *succ = [[NSAlert alloc] init];
+                succ.messageText = @"👑 License Activated Successfully!";
+                succ.informativeText = @"Thank you for purchasing LowWatt Handshake Pro!\n\nAll features, lifetime hardware handshake pulses, and power telemetry kickstarts are now permanently unlocked on this Mac.";
+                [succ addButtonWithTitle:@"Done"];
+                [NSApp activateIgnoringOtherApps:YES];
+                [succ runModal];
+            } else {
+                NSAlert *failAlert = [[NSAlert alloc] init];
+                failAlert.messageText = @"Activation Failed";
+                failAlert.informativeText = [NSString stringWithFormat:@"The license server returned:\n%@", errMsg ?: @"Invalid license key or activation limit reached."];
+                [failAlert addButtonWithTitle:@"OK"];
+                [NSApp activateIgnoringOtherApps:YES];
+                [failAlert runModal];
+            }
+        });
+    }];
+    [task resume];
+}
+
+- (void)manageLicense {
+    NSString *licenseKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"LicenseKey"] ?: @"";
+    NSString *maskedKey = licenseKey;
+    if ([licenseKey length] > 8) {
+        NSString *start = [licenseKey substringToIndex:4];
+        NSString *end = [licenseKey substringFromIndex:[licenseKey length] - 4];
+        maskedKey = [NSString stringWithFormat:@"%@••••••••%@", start, end];
+    }
+    NSString *email = [[NSUserDefaults standardUserDefaults] stringForKey:@"LicenseCustomerEmail"] ?: @"Activated Mac";
+    BOOL isOffline = [[NSUserDefaults standardUserDefaults] boolForKey:@"IsOfflineGrace"];
+
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = @"LowWatt Handshake Pro License";
+    alert.informativeText = [NSString stringWithFormat:@"Status: 👑 Pro License Active%@\nLicense Key: %@\nRegistered To: %@\n\nYou can deactivate this license if you wish to transfer it to another Mac.", (isOffline ? @" (Offline Mode)" : @""), maskedKey, email];
+    [alert addButtonWithTitle:@"OK"];
+    [alert addButtonWithTitle:@"Deactivate License"];
+    [alert addButtonWithTitle:@"Copy Key"];
+
+    NSImage *logo = [self loadBrandLogo];
+    if (logo) {
+        [logo setSize:NSMakeSize(64, 64)];
+        alert.icon = logo;
+    }
+    [NSApp activateIgnoringOtherApps:YES];
+    NSModalResponse resp = [alert runModal];
+    if (resp == NSAlertSecondButtonReturn) {
+        [self deactivateLicense];
+    } else if (resp == NSAlertThirdButtonReturn) {
+        NSPasteboard *pb = [NSPasteboard generalPasteboard];
+        [pb clearContents];
+        [pb setString:licenseKey forType:NSPasteboardTypeString];
+    }
+}
+
+- (void)deactivateLicense {
+    NSAlert *confirm = [[NSAlert alloc] init];
+    confirm.messageText = @"Deactivate License?";
+    confirm.informativeText = @"Are you sure you want to deactivate your license on this Mac? The app will return to the free trial status.";
+    [confirm addButtonWithTitle:@"Deactivate"];
+    [confirm addButtonWithTitle:@"Cancel"];
+    if ([confirm runModal] != NSAlertFirstButtonReturn) {
+        return;
+    }
+
+    NSString *licenseKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"LicenseKey"];
+    NSString *instanceId = [[NSUserDefaults standardUserDefaults] stringForKey:@"LicenseInstanceId"];
+
+    if (licenseKey && instanceId && instanceId.length > 0) {
+        NSURL *url = [NSURL URLWithString:@"https://api.lemonsqueezy.com/v1/licenses/deactivate"];
+        NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+        req.HTTPMethod = @"POST";
+        [req setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
+        NSString *body = [NSString stringWithFormat:@"license_key=%@&instance_id=%@",
+                          [licenseKey stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet alphanumericCharacterSet]],
+                          [instanceId stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet alphanumericCharacterSet]]];
+        req.HTTPBody = [body dataUsingEncoding:NSUTF8StringEncoding];
+        [[[NSURLSession sharedSession] dataTaskWithRequest:req] resume];
+    }
+
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"IsProLicenseActive"];
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"LicenseKey"];
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"LicenseActivatedDate"];
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"LicenseInstanceId"];
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"LicenseCustomerEmail"];
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"IsOfflineGrace"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+
+    [self updatePowerStateAndCheck];
+
+    NSAlert *done = [[NSAlert alloc] init];
+    done.messageText = @"License Deactivated";
+    done.informativeText = @"Your license has been removed from this Mac. You can now activate it on another device.";
+    [done addButtonWithTitle:@"OK"];
+    [NSApp activateIgnoringOtherApps:YES];
+    [done runModal];
 }
 
 - (BOOL)isVersion:(NSString *)remoteVer newerThan:(NSString *)currentVer {
