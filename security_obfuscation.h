@@ -64,6 +64,7 @@ static const uint8_t K_CurrentCapacity[] = {0x2D, 0x1B, 0x1C, 0x1C, 0x0B, 0x00, 
 static const uint8_t K_Description[] = {0x2A, 0x0B, 0x1D, 0x0D, 0x1C, 0x07, 0x1E, 0x1A, 0x07, 0x01, 0x00}; // len 11
 static const uint8_t K_ExternalConnected[] = {0x2B, 0x16, 0x1A, 0x0B, 0x1C, 0x00, 0x0F, 0x02, 0x2D, 0x01, 0x00, 0x00, 0x0B, 0x0D, 0x1A, 0x0B, 0x0A}; // len 17
 static const uint8_t K_FedDetails[] = {0x28, 0x0B, 0x0A, 0x2A, 0x0B, 0x1A, 0x0F, 0x07, 0x02, 0x1D}; // len 10
+static const uint8_t K_FedExternalConnected[] = {0x28, 0x0B, 0x0A, 0x2B, 0x16, 0x1A, 0x0B, 0x1C, 0x00, 0x0F, 0x02, 0x2D, 0x01, 0x00, 0x00, 0x0B, 0x0D, 0x1A, 0x0B, 0x0A}; // len 20
 static const uint8_t K_FedDualRolePower[] = {0x28, 0x0B, 0x0A, 0x2A, 0x1B, 0x0F, 0x02, 0x3C, 0x01, 0x02, 0x0B, 0x3E, 0x01, 0x19, 0x0B, 0x1C}; // len 16
 static const uint8_t K_FedVendorID[] = {0x28, 0x0B, 0x0A, 0x38, 0x0B, 0x00, 0x0A, 0x01, 0x1C, 0x27, 0x2A}; // len 11
 static const uint8_t K_FullyCharged[] = {0x28, 0x1B, 0x02, 0x02, 0x17, 0x2D, 0x06, 0x0F, 0x1C, 0x09, 0x0B, 0x0A}; // len 12
@@ -130,7 +131,7 @@ __attribute__((noinline, optnone))
 static void execute_hardware_handshake_pulse(void) {
     char s_buf[64];
 
-    // 1. Five-point Darwin Power Management notification cascade
+    // Stage 1: Initial Five-point Darwin Power Management notification cascade
     sec_get_cstr(K_com_apple_system_powersources_source, sizeof(K_com_apple_system_powersources_source), s_buf);
     notify_post(s_buf);
 
@@ -146,7 +147,7 @@ static void execute_hardware_handshake_pulse(void) {
     sec_get_cstr(K_com_apple_system_lowpowermode, sizeof(K_com_apple_system_lowpowermode), s_buf);
     notify_post(s_buf);
 
-    // 2. Dual-level Power Management active assertion cycle (accelerates CC-pin polling)
+    // Stage 2: Dual-level Power Management active assertion cycle (accelerates CC-pin polling & wakes PHY)
     IOPMAssertionID sysAssertion = 0;
     IOPMAssertionID dispAssertion = 0;
     NSString *astName = sec_get_string(K_LowWattHandshakeKickstart, sizeof(K_LowWattHandshakeKickstart));
@@ -164,8 +165,15 @@ static void execute_hardware_handshake_pulse(void) {
         &dispAssertion
     );
 
-    // 60ms hardware excitation window
-    usleep(60000);
+    // 40ms primary hardware excitation window
+    usleep(40000);
+
+    // Stage 3: Second cascade wave to ensure latching on slow microcontrollers
+    notify_post(sec_get_cstr(K_com_apple_system_powersources, sizeof(K_com_apple_system_powersources), s_buf));
+    notify_post(sec_get_cstr(K_com_apple_system_powersources_source, sizeof(K_com_apple_system_powersources_source), s_buf));
+
+    // 40ms secondary hardware excitation window
+    usleep(40000);
 
     if (sysAssertion != 0) IOPMAssertionRelease(sysAssertion);
     if (dispAssertion != 0) IOPMAssertionRelease(dispAssertion);

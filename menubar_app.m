@@ -240,8 +240,71 @@ static void powerSourceNotificationCallback(void *context) {
         CFNumberGetValue((CFNumberRef)curCap, kCFNumberIntType, outBatteryPct);
     }
 
+    // Read FedDetails and PowerTelemetry to detect physical hardware connection even before kernel PDO latch
+    BOOL fedConn = NO;
+    CFArrayRef earlyFed = (CFArrayRef)IORegistryEntryCreateCFProperty(service, SEC_CFSTR(FedDetails), kCFAllocatorDefault, 0);
+    if (earlyFed && CFGetTypeID(earlyFed) == CFArrayGetTypeID()) {
+        CFIndex fedCount = CFArrayGetCount(earlyFed);
+        for (CFIndex i = 0; i < fedCount; i++) {
+            CFDictionaryRef fDict = (CFDictionaryRef)CFArrayGetValueAtIndex(earlyFed, i);
+            if (fDict && CFGetTypeID(fDict) == CFDictionaryGetTypeID()) {
+                CFNumberRef fConn = (CFNumberRef)CFDictionaryGetValue(fDict, SEC_CFSTR(FedExternalConnected));
+                if (fConn && CFGetTypeID(fConn) == CFNumberGetTypeID()) {
+                    int val = 0;
+                    CFNumberGetValue(fConn, kCFNumberIntType, &val);
+                    if (val > 0) {
+                        fedConn = YES;
+                        break;
+                    }
+                }
+            }
+        }
+        CFRelease(earlyFed);
+    }
+
+    BOOL pwrInPresent = NO;
+    CFDictionaryRef earlyTelem = (CFDictionaryRef)IORegistryEntryCreateCFProperty(service, SEC_CFSTR(PowerTelemetryData), kCFAllocatorDefault, 0);
+    if (earlyTelem && CFGetTypeID(earlyTelem) == CFDictionaryGetTypeID()) {
+        CFNumberRef vIn = (CFNumberRef)CFDictionaryGetValue(earlyTelem, SEC_CFSTR(SystemVoltageIn));
+        CFNumberRef pIn = (CFNumberRef)CFDictionaryGetValue(earlyTelem, SEC_CFSTR(SystemPowerIn));
+        if (vIn && CFGetTypeID(vIn) == CFNumberGetTypeID()) {
+            double v = 0;
+            CFNumberGetValue(vIn, kCFNumberDoubleType, &v);
+            if (v > 1000.0) pwrInPresent = YES;
+        }
+        if (pIn && CFGetTypeID(pIn) == CFNumberGetTypeID()) {
+            double p = 0;
+            CFNumberGetValue(pIn, kCFNumberDoubleType, &p);
+            if (p > 100.0) pwrInPresent = YES;
+        }
+        CFRelease(earlyTelem);
+    }
+
+    BOOL portAttached = NO;
+    CFArrayRef earlyPort = (CFArrayRef)IORegistryEntryCreateCFProperty(service, SEC_CFSTR(PortControllerInfo), kCFAllocatorDefault, 0);
+    if (earlyPort && CFGetTypeID(earlyPort) == CFArrayGetTypeID()) {
+        CFIndex pCount = CFArrayGetCount(earlyPort);
+        for (CFIndex i = 0; i < pCount; i++) {
+            CFDictionaryRef pDict = (CFDictionaryRef)CFArrayGetValueAtIndex(earlyPort, i);
+            if (pDict && CFGetTypeID(pDict) == CFDictionaryGetTypeID()) {
+                int npdo = 0, attach = 0, detach = 0;
+                CFNumberRef npNum = (CFNumberRef)CFDictionaryGetValue(pDict, SEC_CFSTR(PortControllerNPDOs));
+                CFNumberRef attNum = (CFNumberRef)CFDictionaryGetValue(pDict, SEC_CFSTR(PortControllerAttachCount));
+                CFNumberRef detNum = (CFNumberRef)CFDictionaryGetValue(pDict, SEC_CFSTR(PortControllerDetachCount));
+                if (npNum && CFGetTypeID(npNum) == CFNumberGetTypeID()) CFNumberGetValue(npNum, kCFNumberIntType, &npdo);
+                if (attNum && CFGetTypeID(attNum) == CFNumberGetTypeID()) CFNumberGetValue(attNum, kCFNumberIntType, &attach);
+                if (detNum && CFGetTypeID(detNum) == CFNumberGetTypeID()) CFNumberGetValue(detNum, kCFNumberIntType, &detach);
+                if (npdo > 0 || attach > detach) {
+                    portAttached = YES;
+                    break;
+                }
+            }
+        }
+        CFRelease(earlyPort);
+    }
+
     // Determine connection state:
-    BOOL isConnected = (extConn == kCFBooleanTrue || rawExtConn == kCFBooleanTrue);
+    BOOL isConnected = (extConn == kCFBooleanTrue || rawExtConn == kCFBooleanTrue || fedConn || pwrInPresent || portAttached);
     if (!isConnected) {
         *outConnected = NO;
         *outRatedWatts = 0;
@@ -454,6 +517,43 @@ static void powerSourceNotificationCallback(void *context) {
                     if (loser == 0 && fet > 0) {
                         connectedPortIdx = (int)i;
                         break;
+                    }
+                }
+            }
+        }
+
+        // Step 3: Match from FedDetails where physical CC-pin detects external connection
+        if (connectedPortIdx < 0 && fedDetails && CFGetTypeID(fedDetails) == CFArrayGetTypeID()) {
+            CFIndex fedCount = CFArrayGetCount(fedDetails);
+            for (CFIndex i = 0; i < fedCount && i < portCount; i++) {
+                CFDictionaryRef fDict = (CFDictionaryRef)CFArrayGetValueAtIndex(fedDetails, i);
+                if (fDict && CFGetTypeID(fDict) == CFDictionaryGetTypeID()) {
+                    CFNumberRef fConn = (CFNumberRef)CFDictionaryGetValue(fDict, SEC_CFSTR(FedExternalConnected));
+                    if (fConn && CFGetTypeID(fConn) == CFNumberGetTypeID()) {
+                        int val = 0;
+                        CFNumberGetValue(fConn, kCFNumberIntType, &val);
+                        if (val > 0) {
+                            connectedPortIdx = (int)i;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 4: Fallback to any port with active NPDOs
+        if (connectedPortIdx < 0) {
+            for (CFIndex i = 0; i < portCount; i++) {
+                CFDictionaryRef pDict = (CFDictionaryRef)CFArrayGetValueAtIndex(portInfo, i);
+                if (pDict && CFGetTypeID(pDict) == CFDictionaryGetTypeID()) {
+                    int npdo = 0;
+                    CFNumberRef npdoNum = (CFNumberRef)CFDictionaryGetValue(pDict, SEC_CFSTR(PortControllerNPDOs));
+                    if (npdoNum && CFGetTypeID(npdoNum) == CFNumberGetTypeID()) {
+                        CFNumberGetValue(npdoNum, kCFNumberIntType, &npdo);
+                        if (npdo > 0) {
+                            connectedPortIdx = (int)i;
+                            break;
+                        }
                     }
                 }
             }
@@ -818,11 +918,16 @@ static void powerSourceNotificationCallback(void *context) {
     self.burstTimer = [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer * _Nonnull bTimer) {
         [weakSelf updatePowerStateAndCheck];
         weakSelf.burstCounter--;
+        // Multi-wave retry pulses at 1.5s and 3.0s to latch stubborn PD contracts
+        if (weakSelf.burstCounter == 35 || weakSelf.burstCounter == 20) {
+            [weakSelf executeHandshakePulse];
+        }
         if (weakSelf.burstCounter <= 0) {
             [bTimer invalidate];
             weakSelf.burstTimer = nil;
         }
     }];
+    [[NSRunLoop currentRunLoop] addTimer:self.burstTimer forMode:NSRunLoopCommonModes];
 }
 
 - (void)handlePowerChangeNotification {
@@ -906,6 +1011,8 @@ static void powerSourceNotificationCallback(void *context) {
                 self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: %d W (Idle Draw)\nBattery: Fully Charged (%d%%)\nSource: %@ (Max %d W)", (int)round(actualWatts), batteryPct, type, ratedWatts];
             } else if (isHoldLimited) {
                 self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: %d W (Idle Draw)\nBattery Charging: Paused (Charge Limit Hold at %d%%)\nSource: %@ (Max %d W)", (int)round(actualWatts), batteryPct, type, ratedWatts];
+            } else if (actualWatts <= 0.0 && ratedWatts <= 0) {
+                self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: Standby / Negotiation Pending\nSource: %@\nClick 'Force Handshake Kickstart' to wake power handshake", type];
             } else {
                 self.statusItem.button.toolTip = [NSString stringWithFormat:@"LowWatt Handshake: %d W (Max %d W)\nSource: %@", (int)round(actualWatts), ratedWatts, type];
             }
@@ -1150,19 +1257,16 @@ static void powerSourceNotificationCallback(void *context) {
 }
 
 - (void)manualKickstart {
-    if (!self.lastConnected) {
-        NSAlert *alert = [[NSAlert alloc] init];
-        alert.messageText = @"No Charger Connected";
-        alert.informativeText = @"Please plug in your USB-C charger or power bank first.\n\nOnce connected, Force Handshake Kickstart will send a hardware excitation pulse and Darwin notification cascade to re-negotiate power delivery.";
-        [alert addButtonWithTitle:@"OK"];
-        [NSApp activateIgnoringOtherApps:YES];
-        [alert runModal];
-        return;
-    }
-
-    [self executeHandshakePulse];
+    // 1. Play tactile alert sound
     AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
+
+    // 2. Execute deep hardware handshake excitation pulse (Darwin cascade + dual IOPM assertions)
+    [self executeHandshakePulse];
+
+    // 3. Launch aggressive 5-second fast burst polling sequence with repeated retry pulses
     [self startFastBurstPoll];
+
+    // 4. Force immediate power state query
     [self updatePowerStateAndCheck];
 }
 
