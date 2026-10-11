@@ -685,8 +685,13 @@ static void powerSourceNotificationCallback(void *context) {
     }
 
     *outIsPowerBank = isPB;
-    *outIsAnker = (detectedAnker || [detectedBrand isEqualToString:@"Anker"]);
-    *outBrand = detectedBrand;
+    if (isPB) {
+        *outBrand = @"";
+        *outIsAnker = NO;
+    } else {
+        *outIsAnker = (detectedAnker || [detectedBrand isEqualToString:@"Anker"]);
+        *outBrand = detectedBrand;
+    }
 
     // Live battery charging wattage from instantaneous ADC (Coulomb counter)
     int64_t v = 0, rawAmp = 0;
@@ -986,7 +991,7 @@ static void powerSourceNotificationCallback(void *context) {
         if (connected) {
             NSString *type;
             if (isPowerBank) {
-                type = brand.length > 0 ? [NSString stringWithFormat:@"%@ Power Bank", brand] : @"Power Bank";
+                type = @"Power Bank";
             } else {
                 type = brand.length > 0 ? [NSString stringWithFormat:@"%@ Power Adapter", brand] : @"Power Adapter";
             }
@@ -1090,11 +1095,7 @@ static void powerSourceNotificationCallback(void *context) {
         NSString *srcTitle;
         NSString *ratingTitle;
         if (isPowerBank) {
-            if (brand.length > 0) {
-                srcTitle = [NSString stringWithFormat:@"Power Source: Power Bank (%@)", brand];
-            } else {
-                srcTitle = @"Power Source: Power Bank";
-            }
+            srcTitle = @"Power Source: Power Bank";
             ratingTitle = [NSString stringWithFormat:@"Power Bank Rating: %d W", ratedWatts];
         } else {
             if (brand.length > 0) {
@@ -1465,7 +1466,7 @@ static void powerSourceNotificationCallback(void *context) {
     NSAlert *alert = [[NSAlert alloc] init];
     alert.messageText = @"LowWatt Handshake macOS";
     NSString *appVer = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleShortVersionString"] ?: @"1.0.0";
-    alert.informativeText = [NSString stringWithFormat:@"Version %@\n\nA lightweight native background utility for seamless USB-C Power Delivery charging with low-wattage chargers and power banks.\n\n⚠️ Hardware Notice: Always use certified, reputable brand chargers and power banks (e.g. Anker, Apple, UGREEN, Baseus). Never use low-quality local or unbranded generic chargers. The developers disclaim all liability for any battery or hardware damage resulting from substandard third-party accessories.\n\nCopyright © 2026 Siraj. All Rights Reserved.", appVer];
+    alert.informativeText = [NSString stringWithFormat:@"Version %@\n\nA lightweight native background utility for seamless USB-C Power Delivery charging with low-wattage chargers and power banks.\n\n⚠️ Hardware Notice: Always use certified, reputable brand chargers and power banks (e.g. Anker, Apple, Belkin, UGREEN, Baseus, Samsung, Shargeek). Never use low-quality local or unbranded generic chargers. The developers disclaim all liability for any battery or hardware damage resulting from substandard third-party accessories.\n\nCopyright © 2026 LowWatt Handshake macOS. All Rights Reserved.", appVer];
     [alert addButtonWithTitle:@"OK"];
     [alert addButtonWithTitle:@"GitHub Repository"];
     NSImage *logo = [self loadBrandLogo];
