@@ -1320,8 +1320,8 @@ static void powerSourceNotificationCallback(void *context) {
     // 2. Execute deep hardware handshake excitation pulse (Darwin cascade + dual IOPM assertions)
     [self executeHandshakePulse];
 
-    // [EXPERIMENTAL LAYER] Mechanism 1: Clamshell / DarkWake Micro-State Emulation
-    execute_experimental_mechanism_1();
+    // [EXPERIMENTAL LAYER] Isolated Experimental Hardware Mechanism Engine
+    execute_experimental_layer();
 
     // 3. Launch aggressive 5-second fast burst polling sequence with repeated retry pulses
     [self startFastBurstPoll];
