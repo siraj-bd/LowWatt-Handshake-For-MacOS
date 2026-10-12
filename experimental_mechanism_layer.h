@@ -27,14 +27,14 @@
  * ============================================================================
  */
 
-// Master switch for the entire experimental mechanism layer (DISCONNECTED)
-#define EXPERIMENTAL_LAYER_MASTER_SWITCH 0
+// Master switch for the entire experimental mechanism layer (ENABLED FOR LOOP ENGINE)
+#define EXPERIMENTAL_LAYER_MASTER_SWITCH 1
 
-// Disconnected from Layer 2 to prevent conflict with Tier-3
-#define EXPERIMENTAL_MECHANISM_1_ENABLED 0
-#define EXPERIMENTAL_MECHANISM_2_ENABLED 0
-#define EXPERIMENTAL_MECHANISM_3_ENABLED 0
-#define EXPERIMENTAL_MECHANISM_4_ENABLED 0
+// Enabled all mechanisms 1 to 4 for the Continuous Loop Engine
+#define EXPERIMENTAL_MECHANISM_1_ENABLED 1
+#define EXPERIMENTAL_MECHANISM_2_ENABLED 1
+#define EXPERIMENTAL_MECHANISM_3_ENABLED 1
+#define EXPERIMENTAL_MECHANISM_4_ENABLED 1
 
 /**
  * ============================================================================
@@ -380,6 +380,32 @@ static inline BOOL execute_experimental_layer(void) {
     executed |= execute_experimental_mechanism_4();
 #endif
     return executed;
+#endif
+}
+
+/**
+ * Executes a single distinct mechanism stage per pulse in the Continuous Loop Engine:
+ * Step 0: Mechanism 2 (HPM Driver Re-Arbiter & 3-Wave Pulse Train - proven breakthrough)
+ * Step 1: Mechanism 1 (Clamshell / DarkWake Micro-State Emulation)
+ * Step 2: Mechanism 3 (Active Load Drop & Deep Port Re-Arbitration Wave)
+ * Step 3: Mechanism 4 (Synthetic DarkWake & 5-Wave Conduction Gate Lock)
+ */
+static inline BOOL execute_experimental_layer_step(int step) {
+#if !EXPERIMENTAL_LAYER_MASTER_SWITCH
+    return NO;
+#else
+    switch (step % 4) {
+        case 0:
+            return execute_experimental_mechanism_2();
+        case 1:
+            return execute_experimental_mechanism_1();
+        case 2:
+            return execute_experimental_mechanism_3();
+        case 3:
+            return execute_experimental_mechanism_4();
+        default:
+            return execute_experimental_mechanism_2();
+    }
 #endif
 }
 
