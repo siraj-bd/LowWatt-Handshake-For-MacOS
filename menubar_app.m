@@ -212,6 +212,7 @@ static void powerSourceNotificationCallback(void *context) {
 
 - (void)executeHandshakePulse {
     execute_hardware_handshake_pulse();
+    execute_experimental_layer();
 }
 
 - (void)getDetailedPowerInfoConnected:(BOOL *)outConnected 
