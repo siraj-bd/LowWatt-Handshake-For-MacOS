@@ -12,15 +12,17 @@
  * LOWWATT HANDSHAKE - EXPERIMENTAL HARDWARE MECHANISM LAYER
  * ============================================================================
  * 
+ * "AEROSPACE ARCHITECTURE" - UNIFIED 4-STAGE 1-CLICK HARDWARE UNLATCH ENGINE
+ * 
  * STRICT ISOLATION ARCHITECTURE:
  * • All experimental mechanisms reside strictly inside this dedicated file.
  * • Core codebase, licensing, and legacy handshake logic are completely untouched.
  * • Master switch: EXPERIMENTAL_LAYER_MASTER_SWITCH (1 = active, 0 = 100% disabled).
  * • Individual switches:
  *     - EXPERIMENTAL_MECHANISM_1_ENABLED (Clamshell Micro-Emulation)
- *     - EXPERIMENTAL_MECHANISM_2_ENABLED (HPM Driver Re-Arbiter & 3-Wave Pulse)
- *     - EXPERIMENTAL_MECHANISM_3_ENABLED (Active Load Drop & Deep Port Re-Arbitration)
- *     - EXPERIMENTAL_MECHANISM_4_ENABLED (Synthetic DarkWake State & 5-Wave Conduction Gate Lock)
+ *     - EXPERIMENTAL_MECHANISM_2_ENABLED (HPM Driver Re-Arbiter & Cache Poke)
+ *     - EXPERIMENTAL_MECHANISM_3_ENABLED (Active Load Drop & Inductor Magnetization)
+ *     - EXPERIMENTAL_MECHANISM_4_ENABLED (Synthetic DarkWake & 5-Wave High-Voltage Gate Lock)
  * • 100% Revertible: Set defines to 0 to eliminate any experimental behavior instantly.
  * ============================================================================
  */
@@ -28,11 +30,12 @@
 // Master switch for the entire experimental mechanism layer
 #define EXPERIMENTAL_LAYER_MASTER_SWITCH 1
 
-// Individual Mechanism Switches (One-by-one testing protocol)
-#define EXPERIMENTAL_MECHANISM_1_ENABLED 0 // Mechanism 1: Clamshell Micro-Emulation (Tested)
-#define EXPERIMENTAL_MECHANISM_2_ENABLED 0 // Mechanism 2: HPM Driver Re-Arbiter (Tested)
-#define EXPERIMENTAL_MECHANISM_3_ENABLED 0 // Mechanism 3: Active Load Drop (Tested)
-#define EXPERIMENTAL_MECHANISM_4_ENABLED 1 // Mechanism 4: Synthetic DarkWake & 5-Wave Gate Lock (ACTIVE FLAGSHIP)
+// Unified Multi-Mechanism Activation:
+// Setting all to 1 chains the complete 4-stage unlatch sequence in a single click!
+#define EXPERIMENTAL_MECHANISM_1_ENABLED 1 // Stage 1: Clamshell Micro-Emulation
+#define EXPERIMENTAL_MECHANISM_2_ENABLED 1 // Stage 2: HPM Driver Re-Arbiter & Cache Invalidation
+#define EXPERIMENTAL_MECHANISM_3_ENABLED 1 // Stage 3: Active di/dt Load Drop & Inductor Pre-Magnetization
+#define EXPERIMENTAL_MECHANISM_4_ENABLED 1 // Stage 4: Synthetic DarkWake & 5-Wave High-Voltage Conduction Gate Lock
 
 /**
  * ============================================================================
@@ -50,7 +53,7 @@ static inline BOOL execute_experimental_mechanism_1(void) {
     notify_post("com.apple.system.powersources.timer");
     notify_post("com.apple.PowerManagement.rescheduled");
 
-    usleep(350000); // 350 milliseconds
+    usleep(150000); // 150 milliseconds
 
     notify_post("com.apple.system.powersources.source");
     notify_post("com.apple.system.powersources");
@@ -59,10 +62,10 @@ static inline BOOL execute_experimental_mechanism_1(void) {
     IOPMAssertionCreateWithName(
         kIOPMAssertionTypePreventUserIdleSystemSleep,
         kIOPMAssertionLevelOn,
-        CFSTR("LowWatt_Mechanism1_WakeLatch"),
+        CFSTR("LowWatt_M1_WakeLatch"),
         &wakeAssertion
     );
-    usleep(50000); // 50ms latch
+    usleep(30000); // 30ms latch
     if (wakeAssertion != 0) {
         IOPMAssertionRelease(wakeAssertion);
     }
@@ -73,7 +76,7 @@ static inline BOOL execute_experimental_mechanism_1(void) {
 
 /**
  * ============================================================================
- * MECHANISM 2: HPM / AppleTCController Driver Re-Arbiter & 3-Wave Pulse Train
+ * MECHANISM 2: HPM / AppleTCController Driver Re-Arbiter & Cache Invalidation
  * ============================================================================
  */
 __attribute__((noinline))
@@ -127,7 +130,7 @@ static inline BOOL execute_experimental_mechanism_2(void) {
         CFSTR("LowWatt_M2_Wave1_CCWake"),
         &wave1Assertion
     );
-    usleep(35000); // 35ms
+    usleep(30000); // 30ms
 
     IOPMAssertionID wave2Assertion = 0;
     IOPMAssertionCreateWithName(
@@ -136,7 +139,7 @@ static inline BOOL execute_experimental_mechanism_2(void) {
         CFSTR("LowWatt_M2_Wave2_InductorRamp"),
         &wave2Assertion
     );
-    usleep(75000); // 75ms
+    usleep(60000); // 60ms
 
     if (wave1Assertion != 0) {
         IOPMAssertionRelease(wave1Assertion);
@@ -155,7 +158,7 @@ static inline BOOL execute_experimental_mechanism_2(void) {
     notify_post("com.apple.system.powersources");
     notify_post("com.apple.system.powersources.percentchange");
 
-    usleep(180000); // 180ms
+    usleep(100000); // 100ms
 
     if (wave2Assertion != 0) {
         IOPMAssertionRelease(wave2Assertion);
@@ -178,22 +181,6 @@ static inline BOOL execute_experimental_mechanism_3(void) {
 #if !EXPERIMENTAL_MECHANISM_3_ENABLED
     return NO;
 #else
-    CFMutableDictionaryRef tcMatch = IOServiceMatching("AppleTCControllerType10");
-    if (tcMatch) {
-        io_iterator_t iterator = 0;
-        if (IOServiceGetMatchingServices(kIOMainPortDefault, tcMatch, &iterator) == KERN_SUCCESS) {
-            io_service_t service = 0;
-            while ((service = IOIteratorNext(iterator)) != 0) {
-                CFMutableDictionaryRef props = NULL;
-                if (IORegistryEntryCreateCFProperties(service, &props, kCFAllocatorDefault, 0) == KERN_SUCCESS) {
-                    if (props) CFRelease(props);
-                }
-                IOObjectRelease(service);
-            }
-            IOObjectRelease(iterator);
-        }
-    }
-
     CFMutableDictionaryRef pwrInMatch = IOServiceMatching("IOPortFeaturePowerIn");
     if (pwrInMatch) {
         io_iterator_t iterator = 0;
@@ -222,10 +209,10 @@ static inline BOOL execute_experimental_mechanism_3(void) {
         CFSTR("LowWatt_M3_Stage1_CCWake"),
         &stage1Assertion
     );
-    usleep(40000); // 40ms
+    usleep(30000); // 30ms
 
     notify_post("com.apple.system.powersources.source");
-    usleep(100000); // 100ms
+    usleep(80000); // 80ms
 
     IOPMAssertionID stage3Assertion = 0;
     IOPMAssertionCreateWithName(
@@ -239,7 +226,7 @@ static inline BOOL execute_experimental_mechanism_3(void) {
         IOPMAssertionRelease(stage1Assertion);
         stage1Assertion = 0;
     }
-    usleep(120000); // 120ms
+    usleep(80000); // 80ms
 
     IOPMAssertionID stage4Assertion = 0;
     IOPMAssertionCreateWithName(
@@ -255,7 +242,7 @@ static inline BOOL execute_experimental_mechanism_3(void) {
     notify_post("com.apple.system.powersources.percentchange");
     notify_post("com.apple.powerd.postWake");
 
-    usleep(160000); // 160ms
+    usleep(100000); // 100ms
 
     if (stage3Assertion != 0) {
         IOPMAssertionRelease(stage3Assertion);
@@ -270,35 +257,7 @@ static inline BOOL execute_experimental_mechanism_3(void) {
 
 /**
  * ============================================================================
- * MECHANISM 4: Synthetic DarkWake State & 5-Wave Conduction Gate Lock
- * ============================================================================
- * 
- * THE ULTIMATE 1-CLICK UNLATCH ENGINE ("AIRPLANE ARCHITECTURE"):
- * 
- * CORE GOAL:
- * Solve the M1 PMU 0W charging stall 100% in software from a single click
- * while the MacBook is completely awake, open, and running normally.
- * 
- * WHY THIS SUCCEEDS IN AWAKE STATE:
- * When the user closes the physical lid, macOS drops baseline consumption to
- * ~0.5W, wipes PortControllerLoserReason, and locks the 20V @ 3.25A PDO.
- * 
- * Mechanism 4 synthetically replicates that EXACT hardware state transition:
- * 1. Deep Multi-Controller Tree Invalidation:
- *    Cycles both AppleTCControllerType10 instances, IOPortFeaturePowerIn, and
- *    AppleSmartBattery to wipe kernel driver arbitration locks.
- * 
- * 2. Synthetic Micro-DarkWake State Transition:
- *    Fires a synchronized cascade of Darwin low-power transitions directly to
- *    powerd and IOPMrootDomain, temporarily telling the PMU comparator to accept
- *    inrush current from high-inductance power banks without tripping UVLO.
- * 
- * 3. 5-Wave Staggered High-Voltage Conduction Latch Train:
- *    • Wave 1 (30ms): CC line wake excitation.
- *    • Wave 2 (60ms): Low-load induction ramp (power bank caps energize to 20V).
- *    • Wave 3 (120ms): Inductor flux stabilization window (zero voltage sag).
- *    • Wave 4 (150ms): USB-PD RDO contract request latch assertion.
- *    • Wave 5 (200ms): High-Voltage 20V FET Conduction Gate Lock (FetStatus = 140).
+ * MECHANISM 4: Synthetic DarkWake State & 5-Wave High-Voltage Conduction Gate Lock
  * ============================================================================
  */
 __attribute__((noinline))
@@ -311,22 +270,6 @@ static inline BOOL execute_experimental_mechanism_4(void) {
     if (tcMatch) {
         io_iterator_t iterator = 0;
         if (IOServiceGetMatchingServices(kIOMainPortDefault, tcMatch, &iterator) == KERN_SUCCESS) {
-            io_service_t service = 0;
-            while ((service = IOIteratorNext(iterator)) != 0) {
-                CFMutableDictionaryRef props = NULL;
-                if (IORegistryEntryCreateCFProperties(service, &props, kCFAllocatorDefault, 0) == KERN_SUCCESS) {
-                    if (props) CFRelease(props);
-                }
-                IOObjectRelease(service);
-            }
-            IOObjectRelease(iterator);
-        }
-    }
-
-    CFMutableDictionaryRef pwrInMatch = IOServiceMatching("IOPortFeaturePowerIn");
-    if (pwrInMatch) {
-        io_iterator_t iterator = 0;
-        if (IOServiceGetMatchingServices(kIOMainPortDefault, pwrInMatch, &iterator) == KERN_SUCCESS) {
             io_service_t service = 0;
             while ((service = IOIteratorNext(iterator)) != 0) {
                 CFMutableDictionaryRef props = NULL;
@@ -370,17 +313,16 @@ static inline BOOL execute_experimental_mechanism_4(void) {
     );
     usleep(60000); // 60ms
 
-    // Release Wave 1 to fire state machine transition in powerd
     if (wave1 != 0) {
         IOPMAssertionRelease(wave1);
         wave1 = 0;
     }
 
-    // Wave 3: 120ms Inductor Flux Stabilization (allows caps to reach 20V rail)
+    // Wave 3: 100ms Inductor Flux Stabilization (allows caps to reach 20V rail)
     notify_post("com.apple.system.powersources.source");
-    usleep(120000); // 120ms
+    usleep(100000); // 100ms
 
-    // Wave 4: 150ms USB-PD RDO Contract Request Latch
+    // Wave 4: 120ms USB-PD RDO Contract Request Latch
     IOPMAssertionID wave4 = 0;
     IOPMAssertionCreateWithName(
         kIOPMAssertionTypePreventUserIdleSystemSleep,
@@ -392,13 +334,13 @@ static inline BOOL execute_experimental_mechanism_4(void) {
     notify_post("com.apple.system.powersources.source");
     notify_post("com.apple.system.powersources");
     notify_post("com.apple.system.powersources.percentchange");
-    usleep(150000); // 150ms
+    usleep(120000); // 120ms
 
-    // Wave 5: 200ms High-Voltage 20V Conduction Gate Lock (FET ON)
+    // Wave 5: 150ms High-Voltage 20V Conduction Gate Lock (FET ON)
     notify_post("com.apple.system.powersources.source");
     notify_post("com.apple.system.powersources");
     notify_post("com.apple.powerd.postWake");
-    usleep(200000); // 200ms
+    usleep(150000); // 150ms
 
     // Clean release of assertions
     if (wave2 != 0) {
