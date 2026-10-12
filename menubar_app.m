@@ -1831,6 +1831,12 @@ int main(int argc, const char * argv[]) {
     (void)argv;
     secure_anti_debug_guard();
     @autoreleasepool {
+        // Enforce Single-Instance Guard: exit immediately if another instance is already running
+        NSArray *instances = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.siraj.lowwatthandshake"];
+        if (instances.count > 1) {
+            return 0;
+        }
+
         NSApplication *app = [NSApplication sharedApplication];
         AppDelegate *delegate = [[AppDelegate alloc] init];
         [app setDelegate:delegate];
