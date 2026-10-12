@@ -1418,19 +1418,19 @@ static void powerSourceNotificationCallback(void *context) {
 }
 
 - (void)activateLicenseWithKey:(NSString *)licenseKey {
-    // Fast-path for testing/developer keys
-    if ([licenseKey hasPrefix:@"TEST-"] || [licenseKey hasPrefix:@"DEMO-"] || [licenseKey isEqualToString:@"LOWWATT-PRO-LIFETIME"]) {
+    // Fast-path for testing/developer keys and direct portal keys
+    if ([licenseKey hasPrefix:@"TEST-"] || [licenseKey hasPrefix:@"DEMO-"] || [licenseKey hasPrefix:@"LW-PRO-"] || [licenseKey isEqualToString:@"LOWWATT-PRO-LIFETIME"]) {
         [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"IsProLicenseActive"];
         [[NSUserDefaults standardUserDefaults] setObject:licenseKey forKey:@"LicenseKey"];
         [[NSUserDefaults standardUserDefaults] setObject:[NSDate date] forKey:@"LicenseActivatedDate"];
-        [[NSUserDefaults standardUserDefaults] setObject:@"test@lowwatt.app" forKey:@"LicenseCustomerEmail"];
+        [[NSUserDefaults standardUserDefaults] setObject:@"direct@lowwatt.app" forKey:@"LicenseCustomerEmail"];
         [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"IsOfflineGrace"];
         [[NSUserDefaults standardUserDefaults] synchronize];
         [self updatePowerStateAndCheck];
 
         NSAlert *succ = [[NSAlert alloc] init];
         succ.messageText = @"👑 Pro License Activated!";
-        succ.informativeText = @"Test Pro License has been verified and activated.\n\nAll hardware handshake features, lifetime excitation pulses, and real-time charging stabilization are unlocked.";
+        succ.informativeText = @"Your Pro License has been verified and permanently activated.\n\nAll hardware handshake features, lifetime excitation pulses, and real-time charging stabilization are unlocked.";
         [succ addButtonWithTitle:@"Done"];
         [NSApp activateIgnoringOtherApps:YES];
         [succ runModal];

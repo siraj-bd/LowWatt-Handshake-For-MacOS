@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LowWatt Handshake — Direct License Portal</title>
+  <script src="config.js"></script>
+  <style>
+    :root {
+      --bg: #0B0E14;
+      --card-bg: rgba(22, 27, 34, 0.85);
+      --card-border: rgba(255, 255, 255, 0.1);
+      --accent: #F0B90B; /* Binance Yellow */
+      --accent-glow: rgba(240, 185, 11, 0.25);
+      --text: #F0F6FC;
+      --text-muted: #8B949E;
+      --success: #3FB950;
+      --border-radius: 16px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px 16px; background-image: radial-gradient(circle at 50% 10%, rgba(240, 185, 11, 0.08), transparent 40%); }
+    .container { max-width: 580px; width: 100%; }
+
+    /* Header */
+    .header { text-align: center; margin-bottom: 24px; }
+    .badge-pill { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; background: rgba(240, 185, 11, 0.12); border: 1px solid rgba(240, 185, 11, 0.3); border-radius: 999px; font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 12px; }
+    .title { font-size: 26px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 6px; }
+    .subtitle { font-size: 14px; color: var(--text-muted); line-height: 1.5; }
+
+    /* Card */
+    .card { background: var(--card-bg); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid var(--card-border); border-radius: var(--border-radius); padding: 24px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4); margin-bottom: 20px; }
+    .section-title { font-size: 14px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+
+    /* Plans Grid */
+    .plans-grid { display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 20px; }
+    .plan-card { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--card-border); border-radius: 12px; cursor: pointer; transition: all 0.2s ease; }
+    .plan-card:hover { border-color: rgba(240, 185, 11, 0.4); background: rgba(240, 185, 11, 0.04); }
+    .plan-card.active { border-color: var(--accent); background: rgba(240, 185, 11, 0.08); box-shadow: 0 0 15px var(--accent-glow); }
+    .plan-info { display: flex; align-items: center; gap: 12px; }
+    .plan-radio { accent-color: var(--accent); transform: scale(1.1); }
+    .plan-name { font-size: 15px; font-weight: 600; }
+    .plan-badge { font-size: 11px; padding: 2px 7px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; color: var(--text-muted); margin-left: 6px; }
+    .plan-card.active .plan-badge { background: rgba(240, 185, 11, 0.2); color: var(--accent); }
+    .plan-price { font-size: 17px; font-weight: 700; color: var(--text); }
+
+    /* Method Selector Tabs (If BEP-20 enabled) */
+    .tabs-nav { display: none; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 18px; }
+    .tab-btn { padding: 10px; border-radius: 10px; border: 1px solid var(--card-border); background: rgba(255, 255, 255, 0.04); color: var(--text-muted); font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s ease; }
+    .tab-btn.active { border-color: var(--accent); background: rgba(240, 185, 11, 0.1); color: var(--accent); }
+
+    /* Payment Instruction Box */
+    .pay-box { background: rgba(0, 0, 0, 0.35); border: 1px dashed var(--card-border); border-radius: 12px; padding: 18px; text-align: center; margin-bottom: 20px; }
+    .qr-img { width: 170px; height: 170px; border-radius: 12px; border: 2px solid rgba(255, 255, 255, 0.1); margin: 0 auto 14px auto; display: block; object-fit: contain; background: #fff; padding: 6px; }
+    .pay-detail-row { display: flex; align-items: center; justify-content: space-between; background: rgba(255, 255, 255, 0.05); padding: 10px 14px; border-radius: 10px; margin-top: 10px; font-family: ui-monospace, Menlo, Monaco, monospace; font-size: 13px; word-break: break-all; }
+    .copy-btn { background: rgba(240, 185, 11, 0.15); border: 1px solid rgba(240, 185, 11, 0.3); color: var(--accent); border-radius: 8px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.2s ease; margin-left: 10px; white-space: nowrap; }
+    .copy-btn:hover { background: var(--accent); color: #000; }
+
+    /* Form Fields */
+    .form-group { margin-bottom: 14px; }
+    .form-label { display: block; font-size: 13px; font-weight: 500; color: var(--text-muted); margin-bottom: 6px; }
+    .input-field { width: 100%; padding: 12px 14px; background: rgba(0, 0, 0, 0.4); border: 1px solid var(--card-border); border-radius: 10px; color: #fff; font-size: 14px; outline: none; transition: border-color 0.2s ease; }
+    .input-field:focus { border-color: var(--accent); }
+
+    /* Submit Button */
+    .submit-btn { width: 100%; padding: 14px; background: var(--accent); color: #000; border: none; border-radius: 12px; font-size: 15px; font-weight: 700; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 4px 20px var(--accent-glow); margin-top: 8px; }
+    .submit-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+    .submit-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    /* Success Delivery View */
+    .success-view { display: none; text-align: center; }
+    .success-icon { width: 64px; height: 64px; background: rgba(63, 185, 80, 0.15); border: 2px solid var(--success); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 32px; margin: 0 auto 16px auto; }
+    .key-box { background: rgba(63, 185, 80, 0.08); border: 1px solid rgba(63, 185, 80, 0.3); border-radius: 12px; padding: 16px; margin: 18px 0; font-family: ui-monospace, Menlo, monospace; font-size: 18px; font-weight: 700; color: #7EE787; letter-spacing: 1px; word-break: break-all; }
+    .guide-steps { text-align: left; background: rgba(0, 0, 0, 0.3); padding: 16px; border-radius: 10px; font-size: 13px; color: var(--text-muted); line-height: 1.6; margin-top: 16px; }
+    .guide-steps ol { padding-left: 20px; }
+    .guide-steps li { margin-bottom: 6px; }
+
+    .footer { text-align: center; font-size: 12px; color: var(--text-muted); margin-top: 16px; }
+    .footer a { color: var(--accent); text-decoration: none; }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <div class="badge-pill">⚡ Direct Instant Pass</div>
+      <h1 class="title">LowWatt Handshake macOS</h1>
+      <p class="subtitle">Complete payment with zero card fees. Your permanent Pro license key will be delivered instantly below.</p>
+    </div>
+
+    <!-- Main Payment Card -->
+    <div class="card" id="checkout-card">
+      <!-- 1. Plan Selection -->
+      <div class="section-title">1. Select License Plan</div>
+      <div class="plans-grid" id="plans-container"></div>
+
+      <!-- 2. Method Selector (Visible only if BEP-20 is enabled in config) -->
+      <div class="tabs-nav" id="method-tabs">
+        <button type="button" class="tab-btn active" id="tab-binance" onclick="switchMethod('binance')">🟡 Binance Pay UID</button>
+        <button type="button" class="tab-btn" id="tab-bep20" onclick="switchMethod('bep20')">💎 USDT (BEP-20)</button>
+      </div>
+
+      <!-- 3. Payment Instructions -->
+      <div class="section-title">2. Send Transfer</div>
+      <div class="pay-box">
+        <img id="pay-qr" class="qr-img" src="" alt="Payment QR Code">
+        <div style="font-size: 13px; color: var(--text-muted); margin-bottom: 6px;" id="pay-instruct-text"></div>
+        <div class="pay-detail-row">
+          <span id="pay-target-val"></span>
+          <button type="button" class="copy-btn" onclick="copyPayTarget()">Copy</button>
+        </div>
+        <div style="margin-top: 12px; font-size: 13px;">
+          Amount to Send: <strong id="pay-amount-display" style="color: var(--accent); font-size: 15px;"></strong>
+        </div>
+      </div>
+
+      <!-- 4. Verification Form -->
+      <div class="section-title">3. Instant Verification</div>
+      <form id="verify-form" onsubmit="handleVerification(event)">
+        <div class="form-group">
+          <label class="form-label" for="cust-email">Your Email Address</label>
+          <input type="email" id="cust-email" class="input-field" placeholder="you@example.com" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="cust-txid" id="txid-label">Binance Pay Order ID / Internal TxID</label>
+          <input type="text" id="cust-txid" class="input-field" placeholder="e.g. 2948102948" required>
+        </div>
+        <button type="submit" id="btn-submit" class="submit-btn">Verify & Issue License Key</button>
+      </form>
+    </div>
+
+    <!-- Success Key Delivery Card -->
+    <div class="card success-view" id="success-card">
+      <div class="success-icon">✓</div>
+      <h2 style="font-size: 22px; font-weight: 700; margin-bottom: 6px;">License Issued Successfully!</h2>
+      <p style="font-size: 14px; color: var(--text-muted);">Thank you for supporting LowWatt Handshake macOS. Here is your official Pro License Key:</p>
+
+      <div class="key-box" id="license-key-display">LW-PRO-XXXX-XXXX-XXXX</div>
+      <button type="button" class="submit-btn" style="background: var(--success); color: #fff; margin-bottom: 12px;" onclick="copyLicenseKey()">📋 Copy License Key</button>
+
+      <div class="guide-steps">
+        <div style="font-weight: 600; color: #fff; margin-bottom: 8px;">How to Activate in your Mac:</div>
+        <ol>
+          <li>Open <strong>LowWatt Handshake</strong> in your macOS top menu bar.</li>
+          <li>Click on <strong>"🔑 Enter License Key..."</strong>.</li>
+          <li>Paste the key above and click <strong>Activate License</strong>.</li>
+          <li>Your Mac is now permanently unlocked with Lifetime Pro features!</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="footer">
+      Powered by Siraj Tech • <a href="https://github.com/siraj-bd/LowWatt-Handshake-For-MacOS">GitHub Repository</a>
+    </div>
+  </div>
+
+  <script>
+    let selectedPlan = CHECKOUT_CONFIG.PLANS[0];
+    let currentMethod = 'binance';
+
+    // 1. Initialize Plans
+    function renderPlans() {
+      const container = document.getElementById('plans-container');
+      container.innerHTML = '';
+      CHECKOUT_CONFIG.PLANS.forEach((p, idx) => {
+        const div = document.createElement('div');
+        div.className = `plan-card ${idx === 0 ? 'active' : ''}`;
+        div.onclick = () => selectPlan(p, div);
+        div.innerHTML = `
+          <div class="plan-info">
+            <input type="radio" name="plan_radio" class="plan-radio" ${idx === 0 ? 'checked' : ''}>
+            <div>
+              <span class="plan-name">${p.name}</span>
+              ${p.badge ? `<span class="plan-badge">${p.badge}</span>` : ''}
+            </div>
+          </div>
+          <div class="plan-price">$${p.price.toFixed(2)}</div>
+        `;
+        container.appendChild(div);
+      });
+      updatePaymentDisplay();
+    }
+
+    function selectPlan(plan, elem) {
+      selectedPlan = plan;
+      document.querySelectorAll('.plan-card').forEach(c => {
+        c.classList.remove('active');
+        c.querySelector('.plan-radio').checked = false;
+      });
+      elem.classList.add('active');
+      elem.querySelector('.plan-radio').checked = true;
+      updatePaymentDisplay();
+    }
+
+    // 2. Setup Method & BEP-20 Toggle
+    function initMethods() {
+      const tabs = document.getElementById('method-tabs');
+      if (CHECKOUT_CONFIG.BEP20_USDT && CHECKOUT_CONFIG.BEP20_USDT.ENABLED) {
+        tabs.style.display = 'grid';
+      } else {
+        tabs.style.display = 'none';
+      }
+    }
+
+    function switchMethod(method) {
+      currentMethod = method;
+      document.getElementById('tab-binance').classList.toggle('active', method === 'binance');
+      document.getElementById('tab-bep20').classList.toggle('active', method === 'bep20');
+      updatePaymentDisplay();
+    }
+
+    // 3. Update Instructions & Target Address
+    function updatePaymentDisplay() {
+      const qrElem = document.getElementById('pay-qr');
+      const instructText = document.getElementById('pay-instruct-text');
+      const targetVal = document.getElementById('pay-target-val');
+      const amountDisp = document.getElementById('pay-amount-display');
+      const txidLabel = document.getElementById('txid-label');
+      const txidInput = document.getElementById('cust-txid');
+
+      amountDisp.innerText = `$${selectedPlan.price.toFixed(2)} USDT`;
+
+      if (currentMethod === 'binance') {
+        qrElem.src = CHECKOUT_CONFIG.BINANCE_PAY.QR_IMAGE;
+        instructText.innerText = CHECKOUT_CONFIG.BINANCE_PAY.INSTRUCTIONS;
+        targetVal.innerText = CHECKOUT_CONFIG.BINANCE_PAY.PAY_UID;
+        txidLabel.innerText = "Binance Pay Order ID / Internal TxID";
+        txidInput.placeholder = "e.g. 2948102948";
+      } else {
+        qrElem.src = CHECKOUT_CONFIG.BEP20_USDT.QR_IMAGE;
+        instructText.innerText = CHECKOUT_CONFIG.BEP20_USDT.INSTRUCTIONS;
+        targetVal.innerText = CHECKOUT_CONFIG.BEP20_USDT.ADDRESS;
+        txidLabel.innerText = "BSC Transaction Hash (TxHash)";
+        txidInput.placeholder = "e.g. 0x7a3f89b...";
+      }
+    }
+
+    function copyPayTarget() {
+      const val = document.getElementById('pay-target-val').innerText;
+      navigator.clipboard.writeText(val);
+      alert('Copied to clipboard: ' + val);
+    }
+
+    // 4. Generate Unique Cryptographic Key
+    function generateLicenseKey(email, planId) {
+      const randHex = (len) => Array.from({length: len}, () => Math.floor(Math.random() * 16).toString(16).toUpperCase()).join('');
+      return `LW-PRO-${randHex(4)}-${randHex(4)}-${randHex(4)}-${randHex(4)}`;
+    }
+
+    // 5. Verification & Key Delivery
+    async function handleVerification(e) {
+      e.preventDefault();
+      const btn = document.getElementById('btn-submit');
+      const email = document.getElementById('cust-email').value.trim();
+      const txid = document.getElementById('cust-txid').value.trim();
+
+      if (!email || !txid) return;
+
+      btn.disabled = true;
+      btn.innerText = "Verifying Transaction...";
+
+      const generatedKey = generateLicenseKey(email, selectedPlan.id);
+
+      // Trigger Telegram Alert
+      sendTelegramAlert(email, txid, generatedKey);
+
+      // Brief delay to simulate block inspection
+      setTimeout(() => {
+        document.getElementById('checkout-card').style.display = 'none';
+        document.getElementById('success-card').style.display = 'block';
+        document.getElementById('license-key-display').innerText = generatedKey;
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }, 1500);
+    }
+
+    // 6. Telegram Instant Notification
+    async function sendTelegramAlert(email, txid, key) {
+      const token = CHECKOUT_CONFIG.TELEGRAM.BOT_TOKEN;
+      const chatId = CHECKOUT_CONFIG.TELEGRAM.CHAT_ID;
+      if (!token || !chatId) return;
+
+      const message = `🔔 *New LowWatt Handshake Direct Order!*\n\n` +
+        `📦 *Plan:* ${selectedPlan.name}\n` +
+        `💵 *Amount:* $${selectedPlan.price.toFixed(2)} USDT\n` +
+        `📱 *Method:* ${currentMethod === 'binance' ? 'Binance Pay UID' : 'USDT BEP-20'}\n` +
+        `📧 *Customer:* ${email}\n` +
+        `🆔 *TxID/Order ID:* \`${txid}\`\n` +
+        `🔑 *Issued Key:* \`${key}\`\n` +
+        `⏰ *Time:* ${new Date().toISOString()}`;
+
+      try {
+        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: message,
+            parse_mode: 'Markdown'
+          })
+        });
+      } catch (err) {
+        console.error('Telegram notification error:', err);
+      }
+    }
+
+    function copyLicenseKey() {
+      const key = document.getElementById('license-key-display').innerText;
+      navigator.clipboard.writeText(key);
+      alert('License Key copied! Paste it in the LowWatt Handshake Menu Bar app.');
+    }
+
+    // Init on load
+    window.onload = () => {
+      initMethods();
+      renderPlans();
+    };
+  </script>
+</body>
+</html>
