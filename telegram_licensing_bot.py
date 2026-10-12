@@ -16,14 +16,23 @@ import urllib.request
 import urllib.parse
 
 # --- Configuration ---
-try:
-    from bot_secrets import BINANCE_API_KEY, BINANCE_API_SECRET, TELEGRAM_BOT_TOKEN, ADMIN_CHAT_ID
-    BOT_TOKEN = TELEGRAM_BOT_TOKEN
-except ImportError:
-    BOT_TOKEN = "8743106713:AAFzpHWFwW3hqU9VdLCl8sJZQJOEGele0o0"
-    ADMIN_CHAT_ID = 1025961490
-    BINANCE_API_KEY = ""
-    BINANCE_API_SECRET = ""
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID")
+BINANCE_API_KEY = os.environ.get("BINANCE_API_KEY")
+BINANCE_API_SECRET = os.environ.get("BINANCE_API_SECRET")
+
+if not BOT_TOKEN or not BINANCE_API_KEY:
+    try:
+        from bot_secrets import BINANCE_API_KEY as K, BINANCE_API_SECRET as S, TELEGRAM_BOT_TOKEN as T, ADMIN_CHAT_ID as A
+        BOT_TOKEN = BOT_TOKEN or T
+        ADMIN_CHAT_ID = ADMIN_CHAT_ID or A
+        BINANCE_API_KEY = BINANCE_API_KEY or K
+        BINANCE_API_SECRET = BINANCE_API_SECRET or S
+    except ImportError:
+        pass
+
+BOT_TOKEN = BOT_TOKEN or "8743106713:AAFzpHWFwW3hqU9VdLCl8sJZQJOEGele0o0"
+ADMIN_CHAT_ID = int(ADMIN_CHAT_ID or 1025961490)
 
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
@@ -503,11 +512,35 @@ def binance_monitor_loop():
             print(f"Binance Monitor loop error: {e}")
         time.sleep(4)
 
+# --- Cloud Health HTTP Server (Enables 100% Free Web Service on Render) ---
+def run_http_server():
+    import http.server, socketserver
+    port = int(os.environ.get("PORT", 8080))
+    class HealthHandler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"status":"active","service":"LowWatt Telegram & Binance Monitor"}')
+        def log_message(self, format, *args):
+            pass
+    try:
+        socketserver.TCPServer.allow_reuse_address = True
+        with socketserver.TCPServer(("", port), HealthHandler) as httpd:
+            print(f"🌐 Cloud Health Server active on port {port}")
+            httpd.serve_forever()
+    except Exception as e:
+        print(f"HTTP Server note: {e}")
+
 # --- Polling Daemon ---
 def run_bot():
     init_db()
     print("🤖 LowWatt Telegram Licensing Bot Started...")
     
+    # Launch HTTP Health Server (for Render Free Tier)
+    http_thread = threading.Thread(target=run_http_server, daemon=True)
+    http_thread.start()
+
     # Launch Binance Payment Monitor as Background Thread
     monitor_thread = threading.Thread(target=binance_monitor_loop, daemon=True)
     monitor_thread.start()
