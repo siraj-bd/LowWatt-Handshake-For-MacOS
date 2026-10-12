@@ -26,12 +26,15 @@
 @property (assign, nonatomic) BOOL lastConnected;
 @property (assign, nonatomic) BOOL isLoopRunning;
 @property (assign, nonatomic) int loopPulseCount;
+@property (assign, nonatomic) BOOL loopTimedOut;
+@property (assign, nonatomic) CGFloat radarAngle;
 @property (strong, nonatomic) LoopHandshakeCardView *loopCardView;
 @property (strong, nonatomic) NSImage *connectedBaseImage;
 @property (strong, nonatomic) NSImage *disconnectedBaseImage;
 @property (copy, nonatomic) NSString *detectedBrand;
 
 - (void)handleLoopCardClicked;
+- (void)handleLoopButtonClicked;
 - (void)startHandshakeLoop;
 - (void)stopHandshakeLoopWithSuccess:(BOOL)success;
 - (void)updatePowerStateAndCheck;
@@ -396,6 +399,9 @@ typedef NS_ENUM(NSInteger, RadarLoaderState) {
     [self setNeedsDisplay:YES];
     if (self.isHovered && self.delegate && [self.delegate respondsToSelector:@selector(handleLoopCardClicked)]) {
         [self.delegate handleLoopCardClicked];
+        if (self.enclosingMenuItem && self.enclosingMenuItem.menu) {
+            [self.enclosingMenuItem.menu cancelTracking];
+        }
     }
 }
 
@@ -1603,20 +1609,26 @@ typedef NS_ENUM(NSInteger, RadarLoaderState) {
     [menu addItem:kickItem];
 
     // Additional Loop Handshake Item with Left-side Radar Loader UI
-    if (!self.loopCardView) {
-        self.loopCardView = [[LoopHandshakeCardView alloc] initWithFrame:NSMakeRect(0, 0, 260, 42)];
-        self.loopCardView.delegate = self;
-    }
+    LoopHandshakeCardView *loopCard = [[LoopHandshakeCardView alloc] initWithFrame:NSMakeRect(0, 0, 260, 42)];
+    loopCard.delegate = self;
+    self.loopCardView = loopCard;
+
     BOOL isCurrently65W = (inputVolts >= 15.0 || (isCharging && (actualWatts >= 15.0 || batteryWatts > 0.0)));
     if (isCurrently65W) {
-        [self.loopCardView setSuccessStateWithWatts:(actualWatts > 0 ? (int)round(actualWatts) : (ratedWatts > 0 ? ratedWatts : 65))];
+        [loopCard setSuccessStateWithWatts:(actualWatts > 0 ? (int)round(actualWatts) : (ratedWatts > 0 ? ratedWatts : 65))];
     } else if (self.isLoopRunning) {
-        [self.loopCardView setScanningStateWithPulse:self.loopPulseCount];
+        self.radarAngle += (2.0 * M_PI / 10.0);
+        if (self.radarAngle >= 2.0 * M_PI) self.radarAngle -= 2.0 * M_PI;
+        loopCard.radarView.currentAngle = self.radarAngle;
+        [loopCard setScanningStateWithPulse:self.loopPulseCount];
+    } else if (self.loopTimedOut) {
+        [loopCard setTimeoutState];
     } else {
-        [self.loopCardView setIdleState];
+        [loopCard setIdleState];
     }
-    NSMenuItem *loopItem = [[NSMenuItem alloc] init];
-    loopItem.view = self.loopCardView;
+    NSMenuItem *loopItem = [[NSMenuItem alloc] initWithTitle:@"Continuous Handshake Latch" action:@selector(handleLoopButtonClicked) keyEquivalent:@"l"];
+    [loopItem setTarget:self];
+    loopItem.view = loopCard;
     [menu addItem:loopItem];
 
     [menu addItem:[NSMenuItem separatorItem]];
@@ -1723,6 +1735,7 @@ typedef NS_ENUM(NSInteger, RadarLoaderState) {
 - (void)startHandshakeLoop {
     if (self.isLoopRunning) return;
     self.isLoopRunning = YES;
+    self.loopTimedOut = NO;
     self.loopPulseCount = 0;
 
     AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
@@ -1792,15 +1805,21 @@ typedef NS_ENUM(NSInteger, RadarLoaderState) {
     });
 }
 
+- (void)handleLoopButtonClicked {
+    [self handleLoopCardClicked];
+}
+
 - (void)stopHandshakeLoopWithSuccess:(BOOL)success {
     self.isLoopRunning = NO;
     if (success) {
+        self.loopTimedOut = NO;
         AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
         if (self.loopCardView) {
             [self.loopCardView setSuccessStateWithWatts:65];
         }
         [self updatePowerStateAndCheck];
     } else {
+        self.loopTimedOut = YES;
         if (self.loopCardView) {
             [self.loopCardView setTimeoutState];
         }
