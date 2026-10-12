@@ -66,6 +66,7 @@
     .submit-btn { width: 100%; padding: 14px; background: var(--accent); color: #000; border: none; border-radius: 12px; font-size: 15px; font-weight: 700; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 4px 20px var(--accent-glow); margin-top: 8px; }
     .submit-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
     .submit-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
     /* Success Delivery View */
     .success-view { display: none; text-align: center; }
@@ -115,16 +116,33 @@
         </div>
       </div>
 
-      <!-- 4. Verification Form -->
-      <div class="section-title">3. Instant Verification</div>
-      <form id="verify-form" onsubmit="handleVerification(event)">
+      <!-- 3. Zero-Input Live Payment Detector -->
+      <div class="section-title">3. Instant Automated Delivery</div>
+      <div class="live-detector-box" style="background: rgba(88, 166, 255, 0.08); border: 1px solid rgba(88, 166, 255, 0.25); border-radius: 12px; padding: 18px; margin-bottom: 16px; display: flex; align-items: center; gap: 14px;">
+        <div class="spinner" style="width: 24px; height: 24px; border: 3px solid rgba(88, 166, 255, 0.2); border-top-color: #58A6FF; border-radius: 50%; animation: spin 1s linear infinite; flex-shrink: 0;"></div>
+        <div>
+          <div style="font-weight: 600; color: #58A6FF; font-size: 14px;">📡 Live Payment Detector Active</div>
+          <div style="color: var(--text-muted); font-size: 12.5px; margin-top: 3px; line-height: 1.4;">
+            Just scan & send exact amount from your phone. Your license key will automatically unlock right here in seconds. <strong>Zero typing or TxID needed!</strong>
+          </div>
+        </div>
+      </div>
+
+      <!-- Optional Manual Fallback -->
+      <div style="text-align: center; margin: 12px 0;">
+        <button type="button" onclick="toggleManualForm()" style="background: none; border: none; color: var(--text-muted); font-size: 12px; cursor: pointer; text-decoration: underline;">
+          ▾ Paid earlier? Enter Order ID manually
+        </button>
+      </div>
+
+      <form id="verify-form" style="display: none; margin-top: 12px; background: rgba(0,0,0,0.2); padding: 14px; border-radius: 10px;" onsubmit="handleVerification(event)">
         <div class="form-group">
           <label class="form-label" for="cust-email">Your Email Address</label>
-          <input type="email" id="cust-email" class="input-field" placeholder="you@example.com" required>
+          <input type="email" id="cust-email" class="input-field" placeholder="you@example.com">
         </div>
         <div class="form-group">
           <label class="form-label" for="cust-txid" id="txid-label">Binance Pay Order ID / Internal TxID</label>
-          <input type="text" id="cust-txid" class="input-field" placeholder="e.g. 2948102948" required>
+          <input type="text" id="cust-txid" class="input-field" placeholder="e.g. 2948102948">
         </div>
         <button type="submit" id="btn-submit" class="submit-btn">Verify & Issue License Key</button>
       </form>
@@ -310,10 +328,46 @@
       alert('License Key copied! Paste it in the LowWatt Handshake Menu Bar app.');
     }
 
+    function toggleManualForm() {
+      const f = document.getElementById('verify-form');
+      f.style.display = (f.style.display === 'none' || !f.style.display) ? 'block' : 'none';
+    }
+
+    const pageLoadTime = Math.floor(Date.now() / 1000) - 10;
+    let pollInterval = null;
+
+    function startLiveOrderPolling() {
+      if (pollInterval) clearInterval(pollInterval);
+      pollInterval = setInterval(async () => {
+        try {
+          const res = await fetch(`live_orders.json?_t=${Date.now()}`);
+          if (!res.ok) return;
+          const orders = await res.json();
+          if (Array.isArray(orders) && orders.length > 0) {
+            // Find an order that matches the selected plan amount and occurred recently
+            const matched = orders.find(o => 
+              Math.abs(o.amount - selectedPlan.price) < 0.05 && 
+              o.timestamp >= pageLoadTime
+            );
+            if (matched) {
+              clearInterval(pollInterval);
+              document.getElementById('checkout-card').style.display = 'none';
+              document.getElementById('success-card').style.display = 'block';
+              document.getElementById('license-key-display').innerText = matched.license_key;
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+          }
+        } catch (e) {
+          // Silent polling fail
+        }
+      }, 2500);
+    }
+
     // Init on load
     window.onload = () => {
       initMethods();
       renderPlans();
+      startLiveOrderPolling();
     };
   </script>
 </body>

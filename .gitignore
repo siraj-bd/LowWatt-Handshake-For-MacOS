@@ -44,3 +44,11 @@ AppIcon.icns
 # Backups
 _backup_pre_audit/
 _master_source_private_backup/
+
+# Secrets & Local Databases (Never commit to Git)
+.env
+*.env
+bot_secrets.py
+*.db
+__pycache__/
+
