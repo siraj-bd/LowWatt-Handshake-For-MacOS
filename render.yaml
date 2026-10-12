@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: lowwatt-bot
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: python telegram_licensing_bot.py
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        value: 8743106713:AAFzpHWFwW3hqU9VdLCl8sJZQJOEGele0o0
+      - key: ADMIN_CHAT_ID
+        value: "1025961490"
+      - key: BINANCE_API_KEY
+        sync: false
+      - key: BINANCE_API_SECRET
+        sync: false
