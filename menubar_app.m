@@ -271,6 +271,28 @@ static void powerSourceNotificationCallback(void *context) {
         }
     }
     if (!isConnected) {
+        CFTypeRef fedRef = IORegistryEntryCreateCFProperty(service, SEC_CFSTR(FedDetails), kCFAllocatorDefault, 0);
+        if (fedRef && CFGetTypeID(fedRef) == CFArrayGetTypeID()) {
+            CFArrayRef fArr = (CFArrayRef)fedRef;
+            CFIndex fCount = CFArrayGetCount(fArr);
+            for (CFIndex i = 0; i < fCount; i++) {
+                CFDictionaryRef fDict = (CFDictionaryRef)CFArrayGetValueAtIndex(fArr, i);
+                if (fDict && CFGetTypeID(fDict) == CFDictionaryGetTypeID()) {
+                    CFNumberRef fConn = (CFNumberRef)CFDictionaryGetValue(fDict, SEC_CFSTR(FedExternalConnected));
+                    if (fConn && CFGetTypeID(fConn) == CFNumberGetTypeID()) {
+                        int fVal = 0;
+                        CFNumberGetValue(fConn, kCFNumberIntType, &fVal);
+                        if (fVal > 0) {
+                            isConnected = YES;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (fedRef) CFRelease(fedRef);
+    }
+    if (!isConnected) {
         *outConnected = NO;
         *outRatedWatts = 0;
         *outActualWatts = 0.0;
@@ -1831,6 +1853,16 @@ int main(int argc, const char * argv[]) {
     (void)argv;
     secure_anti_debug_guard();
     @autoreleasepool {
+        for (int i = 1; i < argc; i++) {
+            if (strcmp(argv[i], "--kickstart") == 0) {
+                printf("[LowWatt] Direct Kickstart triggered.\n");
+                execute_hardware_handshake_pulse();
+                execute_experimental_layer();
+                printf("[LowWatt] Done.\n");
+                return 0;
+            }
+        }
+
         // Enforce Single-Instance Guard: exit immediately if another instance is already running
         NSArray *instances = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.siraj.lowwatthandshake"];
         if (instances.count > 1) {
