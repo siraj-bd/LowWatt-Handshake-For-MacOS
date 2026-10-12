@@ -8,6 +8,7 @@
 #import <sys/stat.h>
 #import "security_obfuscation.h"
 #import "experimental_mechanism_layer.h"
+#import "mechanism_layer_tier3.h"
 
 @interface AppDelegate : NSObject <NSApplicationDelegate>
 @property (strong, nonatomic) NSStatusItem *statusItem;
@@ -212,7 +213,7 @@ static void powerSourceNotificationCallback(void *context) {
 
 - (void)executeHandshakePulse {
     execute_hardware_handshake_pulse();
-    execute_experimental_layer();
+    execute_tier3_mechanism_2();
 }
 
 - (void)getDetailedPowerInfoConnected:(BOOL *)outConnected 
@@ -1343,8 +1344,8 @@ static void powerSourceNotificationCallback(void *context) {
     // 2. Execute deep hardware handshake excitation pulse (Darwin cascade + dual IOPM assertions)
     [self executeHandshakePulse];
 
-    // [EXPERIMENTAL LAYER] Isolated Experimental Hardware Mechanism Engine
-    execute_experimental_layer();
+    // [TIER-3 LAYER] Dedicated Mechanism 2 Engine
+    execute_tier3_mechanism_2();
 
     // 3. Launch aggressive 5-second fast burst polling sequence with repeated retry pulses
     [self startFastBurstPoll];
@@ -1857,7 +1858,7 @@ int main(int argc, const char * argv[]) {
             if (strcmp(argv[i], "--kickstart") == 0) {
                 printf("[LowWatt] Direct Kickstart triggered.\n");
                 execute_hardware_handshake_pulse();
-                execute_experimental_layer();
+                execute_tier3_mechanism_2();
                 printf("[LowWatt] Done.\n");
                 return 0;
             }

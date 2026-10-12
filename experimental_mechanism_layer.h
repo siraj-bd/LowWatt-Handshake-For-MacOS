@@ -27,15 +27,14 @@
  * ============================================================================
  */
 
-// Master switch for the entire experimental mechanism layer
-#define EXPERIMENTAL_LAYER_MASTER_SWITCH 1
+// Master switch for the entire experimental mechanism layer (DISCONNECTED)
+#define EXPERIMENTAL_LAYER_MASTER_SWITCH 0
 
-// Unified Multi-Mechanism Activation:
-// Setting all to 1 chains the complete 4-stage unlatch sequence in a single click!
-#define EXPERIMENTAL_MECHANISM_1_ENABLED 1 // Stage 1: Clamshell Micro-Emulation
-#define EXPERIMENTAL_MECHANISM_2_ENABLED 1 // Stage 2: HPM Driver Re-Arbiter & Cache Invalidation
-#define EXPERIMENTAL_MECHANISM_3_ENABLED 1 // Stage 3: Active di/dt Load Drop & Inductor Pre-Magnetization
-#define EXPERIMENTAL_MECHANISM_4_ENABLED 1 // Stage 4: Synthetic DarkWake & 5-Wave High-Voltage Conduction Gate Lock
+// Disconnected from Layer 2 to prevent conflict with Tier-3
+#define EXPERIMENTAL_MECHANISM_1_ENABLED 0
+#define EXPERIMENTAL_MECHANISM_2_ENABLED 0
+#define EXPERIMENTAL_MECHANISM_3_ENABLED 0
+#define EXPERIMENTAL_MECHANISM_4_ENABLED 0
 
 /**
  * ============================================================================
