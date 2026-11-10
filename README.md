@@ -127,22 +127,23 @@ Because **LowWatt Handshake macOS** is distributed directly outside the Mac App 
 
 **LowWatt Handshake macOS** offers flexible, transparent pricing designed for everyone — from travelers needing a quick monthly pass to power users wanting lifetime multi-Mac ownership. Try it risk-free with our **15-Day Free Trial** (no credit card required):
 
-| # | Plan | Price (USD) | Device Seats | Features & Benefits | Badge | Direct Checkout / Download |
+| # | Plan | Price (USD) | Device Seats | Features & Benefits | Badge | Instant Automated Checkout |
 | :-: | :--- | :---: | :---: | :--- | :-: | :---: |
-| **1** | **15-Day Free Trial** | **Free ($0.00)** | 1 Mac | 100% full feature access, auto handshake pulse, real-time live telemetry. No credit card required. | 🟢 *Free Starter* | [📥 Download Free (DMG)](https://github.com/siraj-bd/LowWatt-Handshake-For-MacOS/releases/download/v1.0.0/LowWatt-Handshake-macOS.dmg) |
-| **2** | **Single Monthly Pass** | **$1.99 / mo** | 1 Mac | Flexible month-to-month access for travel or temporary charging setups. Cancel anytime. | ⚡ *Flexible* | [🛒 Buy Monthly Pass](https://siraj-bd.lemonsqueezy.com/checkout/buy/c717ebff-0c02-4294-8c6a-15232dab788e) |
-| **3** | **Single 3-Month Pass** | **$4.99 / 3 mos** | 1 Mac | Quarterly pass for extended travel (save ~17% compared to monthly). | ⏱️ *Quarterly* | [🛒 Buy 3-Month Pass](https://siraj-bd.lemonsqueezy.com/checkout/buy/4c5d83f8-17f9-475a-83dd-f513fe707ec6) |
-| **4** | **Single Yearly Pass** | **$9.99 / year** | 1 Mac | Full 1-year access with all updates included (save 58% compared to monthly). | 💎 *Best Value* | [🛒 Buy Yearly Pass](https://siraj-bd.lemonsqueezy.com/checkout/buy/91d592bf-fd77-4a42-aa8d-1bd98ccd9300) |
-| **5** | **Single Lifetime** | **$19.99 (One-Time)** | 1 Mac | Permanent lifetime license for 1 Mac, all future updates included, offline activation. | ⭐ **Most Popular** | [🛒 Buy Lifetime ($19.99)](https://siraj-bd.lemonsqueezy.com/checkout/buy/39fb59d1-e35d-46ea-a60a-f18c50b19038) |
-| **6** | **Couple / Friends Lifetime** | **$34.99 (One-Time)** | 3 Macs | Permanent lifetime licenses for up to 3 Macs (~$11.66 per device, save $25). | 👥 *Friends Pack* | [🛒 Buy 3-Mac Pack ($34.99)](https://siraj-bd.lemonsqueezy.com/checkout/buy/39fb59d1-e35d-46ea-a60a-f18c50b19038) |
-| **7** | **Family / Power Pack** | **$49.99 (One-Time)** | 5 Macs | Lifetime licenses for up to 5 Macs in your household or business (~$10 per device, save $50). | 🔥 **Best Bundle** | [🛒 Buy 5-Mac Pack ($49.99)](https://siraj-bd.lemonsqueezy.com/checkout/buy/39fb59d1-e35d-46ea-a60a-f18c50b19038) |
+| **1** | **15-Day Free Trial** | **Free ($0.00)** | 1 Mac | 100% full feature access, auto handshake pulse, real-time live telemetry. No credit card required. | 🟢 *Free Starter* | [📥 Download Free (DMG)](https://github.com/siraj-bd/LowWatt-Handshake-For-MacOS/releases/download/v1.0.1/LowWatt-Handshake-macOS.dmg) |
+| **2** | **Single Monthly Pass** | **$1.99 / mo** | 1 Mac | Flexible month-to-month access for travel or temporary charging setups. Cancel anytime. | ⚡ *Flexible* | [🤖 Buy Monthly ($1.99)](https://t.me/Binance_Payment_Receiver_Bot?start=plan_monthly_pass) |
+| **3** | **Single 3-Month Pass** | **$4.99 / 3 mos** | 1 Mac | Quarterly pass for extended travel (save ~17% compared to monthly). | ⏱️ *Quarterly* | [🤖 Buy 3-Month ($4.99)](https://t.me/Binance_Payment_Receiver_Bot?start=plan_quarterly_pass) |
+| **4** | **Single Yearly Pass** | **$9.99 / year** | 1 Mac | Full 1-year access with all updates included (save 58% compared to monthly). | 💎 *Best Value* | [🤖 Buy Yearly ($9.99)](https://t.me/Binance_Payment_Receiver_Bot?start=plan_yearly_pass) |
+| **5** | **Single Lifetime** | **$19.99 (One-Time)** | 1 Mac | Permanent lifetime license for 1 Mac, all future updates included, offline activation. | ⭐ **Most Popular** | [🤖 Buy Lifetime ($19.99)](https://t.me/Binance_Payment_Receiver_Bot?start=plan_single_lifetime) |
+| **6** | **Couple / Friends Lifetime** | **$34.99 (One-Time)** | 3 Macs | Permanent lifetime licenses for up to 3 Macs (~$11.66 per device, save $25). | 👥 *Friends Pack* | [🤖 Buy 3-Mac Pack ($34.99)](https://t.me/Binance_Payment_Receiver_Bot?start=plan_couple_lifetime) |
+| **7** | **Family / Power Pack** | **$49.99 (One-Time)** | 5 Macs | Lifetime licenses for up to 5 Macs in your household or business (~$10 per device, save $50). | 🔥 **Best Bundle** | [🤖 Buy 5-Mac Pack ($49.99)](https://t.me/Binance_Payment_Receiver_Bot?start=plan_family_lifetime) |
 
 ---
 
-### 💳 How to Purchase & Activate:
-1. **Instant Key Delivery:** Purchase your license directly through our secure **[Lemon Squeezy Store Checkout](https://siraj-bd.lemonsqueezy.com/checkout/buy/39fb59d1-e35d-46ea-a60a-f18c50b19038)** (supports Apple Pay, Google Pay, Visa, Mastercard, and PayPal).
-2. **In-App Activation:** Open the LowWatt Handshake menu bar item ➔ Click **"🔑 Enter License Key..."** ➔ Paste your key ➔ Click **Activate**.
-3. **Offline Grace:** Once activated, the app works 100% offline — no continuous internet connection required!
+### 💳 100% Automated Instant Key Delivery:
+1. **Instant Automated Checkout:** Open the **[24/7 Automated Licensing Bot (@Binance_Payment_Receiver_Bot)](https://t.me/Binance_Payment_Receiver_Bot)**. Pay seamlessly via **Binance Pay (Pay UID: `35503368`)** or USDT.
+2. **Instant Delivery:** The license key is automatically generated and delivered to you within 3 seconds of blockchain/Binance confirmation — zero waiting or manual follow-up needed!
+3. **In-App Activation:** Open LowWatt Handshake in your menu bar ➔ Click **"🔑 Enter License Key..."** ➔ Paste your key ➔ Click **Activate**.
+4. **Offline Grace:** Once activated, the app works 100% offline — no continuous internet connection required!
 
 ---
 
