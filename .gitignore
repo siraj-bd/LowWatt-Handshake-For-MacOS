@@ -41,7 +41,10 @@ Info.plist
 battery_*_base.png
 AppIcon.icns
 
-# Backups
+# Backups & Protected Labs
+Lab/
+Problem Lists/
+*.textClipping
 _backup_pre_audit/
 _master_source_private_backup/
 

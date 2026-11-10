@@ -20,6 +20,7 @@ app: menubar_app.m security_obfuscation.h Info.plist
 	cp battery_connected_base.png $(APP_BUNDLE)/Contents/Resources/
 	cp battery_disconnected_base.png $(APP_BUNDLE)/Contents/Resources/
 	cp AppIcon.icns $(APP_BUNDLE)/Contents/Resources/
+	codesign --force --deep --sign - $(APP_BUNDLE)
 
 dmg: app
 	rm -rf dmg_root $(DMG_NAME)

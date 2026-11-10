@@ -6,40 +6,47 @@
 #import <AudioToolbox/AudioToolbox.h>
 #import <notify.h>
 #import <sys/stat.h>
+#import <sys/file.h>
+#import <fcntl.h>
 #import "security_obfuscation.h"
 #import "experimental_mechanism_layer.h"
 
-@class LoopHandshakeCardView;
-
-@protocol LoopHandshakeCardDelegate <NSObject>
-- (void)handleLoopCardClicked;
-@end
-
-@interface AppDelegate : NSObject <NSApplicationDelegate, LoopHandshakeCardDelegate>
+@interface AppDelegate : NSObject <NSApplicationDelegate>
 @property (strong, nonatomic) NSStatusItem *statusItem;
 @property (strong, nonatomic) NSTimer *timer;
-@property (strong, nonatomic) NSTimer *burstTimer;
-@property (strong, nonatomic) NSTimer *updateCheckTimer;
-@property (assign, nonatomic) int burstCounter;
-@property (assign, nonatomic) int stalledCounter;
 @property (assign, nonatomic) BOOL isUpdating;
 @property (assign, nonatomic) BOOL lastConnected;
-@property (assign, nonatomic) BOOL isLoopRunning;
-@property (assign, nonatomic) int loopPulseCount;
-@property (assign, nonatomic) BOOL loopTimedOut;
-@property (assign, nonatomic) CGFloat radarAngle;
-@property (strong, nonatomic) LoopHandshakeCardView *loopCardView;
+@property (assign, nonatomic) BOOL hasExecutedHandshakeOnThisConnection;
+@property (assign, atomic) BOOL isHandshakeInProgress;
 @property (strong, nonatomic) NSImage *connectedBaseImage;
 @property (strong, nonatomic) NSImage *disconnectedBaseImage;
 @property (copy, nonatomic) NSString *detectedBrand;
 
-- (void)handleLoopCardClicked;
-- (void)handleLoopButtonClicked;
-- (void)startHandshakeLoop;
-- (void)stopHandshakeLoopWithSuccess:(BOOL)success;
+// UI Dirty-Check State Cache
+@property (assign, nonatomic) BOOL hasRenderedInitialUI;
+@property (assign, nonatomic) BOOL lastUIConnected;
+@property (assign, nonatomic) int lastUIActualWatts;
+@property (assign, nonatomic) int lastUIRatedWatts;
+@property (assign, nonatomic) int lastUIBatteryPct;
+@property (assign, nonatomic) BOOL lastUIIsCharging;
+@property (assign, nonatomic) BOOL lastUIFullyCharged;
+@property (assign, nonatomic) int lastUINotChargingReason;
+@property (assign, nonatomic) int lastUITimeToFull;
+@property (assign, nonatomic) double lastUIBatteryWatts;
+@property (assign, nonatomic) double lastUIInputVolts;
+@property (assign, nonatomic) double lastUIInputAmps;
+@property (copy, nonatomic) NSString *lastUIDesc;
+
+- (void)startChargingTimer;
+- (void)stopChargingTimer;
+- (void)playFeedbackSoundIfNeeded;
+- (void)toggleAudioFeedback:(id)sender;
+- (void)invalidateUICache;
+- (void)executeHandshakePulse;
+- (void)executeHandshakePulseAsyncWithCompletion:(void(^)(void))completion;
 - (void)updatePowerStateAndCheck;
 - (void)handlePowerChangeNotification;
-- (void)startFastBurstPoll;
+- (void)scheduleSingleSettleRefresh;
 - (void)performSilentUpdateCheck;
 - (void)checkForUpdates;
 - (void)checkForUpdatesSilent:(BOOL)silent;
@@ -153,324 +160,6 @@ static void powerSourceNotificationCallback(void *context) {
 }
 @end
 
-typedef NS_ENUM(NSInteger, RadarLoaderState) {
-    RadarLoaderStateIdle = 0,
-    RadarLoaderStateScanning = 1,
-    RadarLoaderStateSuccess = 2,
-    RadarLoaderStateTimeout = 3
-};
-
-@interface RadarLoaderView : NSView
-@property (assign, nonatomic) RadarLoaderState state;
-@property (assign, nonatomic) CGFloat currentAngle;
-@property (strong, nonatomic) NSTimer *animationTimer;
-- (void)setState:(RadarLoaderState)state;
-@end
-
-@implementation RadarLoaderView
-
-- (instancetype)initWithFrame:(NSRect)frame {
-    self = [super initWithFrame:frame];
-    if (self) {
-        _state = RadarLoaderStateIdle;
-        _currentAngle = 0.0;
-    }
-    return self;
-}
-
-- (void)setState:(RadarLoaderState)state {
-    _state = state;
-    if (state == RadarLoaderStateScanning) {
-        if (!self.animationTimer) {
-            __weak typeof(self) weakSelf = self;
-            self.animationTimer = [NSTimer scheduledTimerWithTimeInterval:0.033 repeats:YES block:^(NSTimer * _Nonnull timer) {
-                (void)timer;
-                __strong typeof(weakSelf) strongSelf = weakSelf;
-                if (!strongSelf) return;
-                strongSelf.currentAngle += (2.0 * M_PI / 60.0);
-                if (strongSelf.currentAngle >= 2.0 * M_PI) {
-                    strongSelf.currentAngle -= 2.0 * M_PI;
-                }
-                [strongSelf setNeedsDisplay:YES];
-            }];
-            [[NSRunLoop currentRunLoop] addTimer:self.animationTimer forMode:NSRunLoopCommonModes];
-        }
-    } else {
-        if (self.animationTimer) {
-            [self.animationTimer invalidate];
-            self.animationTimer = nil;
-        }
-        [self setNeedsDisplay:YES];
-    }
-}
-
-- (void)viewDidMoveToWindow {
-    [super viewDidMoveToWindow];
-    if (!self.window && self.animationTimer) {
-        [self.animationTimer invalidate];
-        self.animationTimer = nil;
-    } else if (self.window && self.state == RadarLoaderStateScanning && !self.animationTimer) {
-        [self setState:RadarLoaderStateScanning];
-    }
-}
-
-- (void)drawRect:(NSRect)dirtyRect {
-    [super drawRect:dirtyRect];
-
-    CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
-    if (!ctx) return;
-
-    NSRect bounds = self.bounds;
-    CGFloat w = bounds.size.width;
-    CGFloat h = bounds.size.height;
-    CGFloat cx = w / 2.0;
-    CGFloat cy = h / 2.0;
-    CGFloat maxRadius = (MIN(w, h) - 4.0) / 2.0;
-    if (maxRadius <= 2.0) return;
-
-    NSColor *amberColor = [NSColor colorWithCalibratedRed:0.980 green:0.757 blue:0.259 alpha:1.0];
-    NSColor *greenColor = [NSColor colorWithCalibratedRed:0.188 green:0.820 blue:0.345 alpha:1.0];
-
-    if (self.state == RadarLoaderStateSuccess) {
-        // --- SUCCESS STATE: Vibrant Green border with crisp Green checkmark in center ---
-        [greenColor setStroke];
-        NSBezierPath *outerPath = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(cx - maxRadius, cy - maxRadius, maxRadius * 2, maxRadius * 2)];
-        [outerPath setLineWidth:1.6];
-        [outerPath stroke];
-
-        [[greenColor colorWithAlphaComponent:0.15] setFill];
-        [outerPath fill];
-
-        // Green checkmark
-        NSBezierPath *check = [NSBezierPath bezierPath];
-        CGFloat s = maxRadius * 0.55;
-        [check moveToPoint:NSMakePoint(cx - s * 0.75, cy - s * 0.05)];
-        [check lineToPoint:NSMakePoint(cx - s * 0.15, cy - s * 0.65)];
-        [check lineToPoint:NSMakePoint(cx + s * 0.85, cy + s * 0.55)];
-        [greenColor setStroke];
-        [check setLineWidth:2.2];
-        [check setLineCapStyle:NSLineCapStyleRound];
-        [check setLineJoinStyle:NSLineJoinStyleRound];
-        [check stroke];
-        return;
-    }
-
-    // --- IDLE / SCANNING / TIMEOUT STATES (Amber #fac142) ---
-    [amberColor setStroke];
-
-    // 1. Outer circle (1px solid #fac142)
-    NSBezierPath *outerCircle = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(cx - maxRadius, cy - maxRadius, maxRadius * 2, maxRadius * 2)];
-    [outerCircle setLineWidth:1.0];
-    [outerCircle stroke];
-
-    // 2. Middle dashed circle (1px dashed #fac142)
-    CGFloat midRadius = maxRadius * 0.65;
-    NSBezierPath *midCircle = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(cx - midRadius, cy - midRadius, midRadius * 2, midRadius * 2)];
-    [midCircle setLineWidth:1.0];
-    CGFloat dash1[2] = {2.5, 2.5};
-    [midCircle setLineDash:dash1 count:2 phase:0.0];
-    [midCircle stroke];
-
-    // 3. Inner dashed circle (1px dashed #fac142)
-    CGFloat innerRadius = maxRadius * 0.32;
-    NSBezierPath *innerCircle = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(cx - innerRadius, cy - innerRadius, innerRadius * 2, innerRadius * 2)];
-    [innerCircle setLineWidth:1.0];
-    CGFloat dash2[2] = {1.8, 1.8};
-    [innerCircle setLineDash:dash2 count:2 phase:0.0];
-    [innerCircle stroke];
-
-    // 4. Center Anchor Dot
-    [[amberColor colorWithAlphaComponent:0.8] setFill];
-    NSBezierPath *centerDot = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(cx - 1.5, cy - 1.5, 3.0, 3.0)];
-    [centerDot fill];
-
-    if (self.state == RadarLoaderStateScanning) {
-        // --- ROTATING RADAR SWEEP (matches .loader span and @keyframes radar82) ---
-        CGContextSaveGState(ctx);
-        CGContextAddEllipseInRect(ctx, CGRectMake(cx - maxRadius, cy - maxRadius, maxRadius * 2, maxRadius * 2));
-        CGContextClip(ctx);
-
-        CGFloat sweepAngle = self.currentAngle;
-        CGFloat tailAngle = 55.0 * (M_PI / 180.0);
-
-        int fanSlices = 12;
-        for (int i = 0; i < fanSlices; i++) {
-            CGFloat frac = (CGFloat)i / (CGFloat)fanSlices;
-            CGFloat a1 = sweepAngle - tailAngle * (1.0 - frac);
-            CGFloat a2 = sweepAngle - tailAngle * (1.0 - (CGFloat)(i + 1) / (CGFloat)fanSlices);
-
-            CGFloat alpha = 0.03 + 0.35 * frac;
-            [[amberColor colorWithAlphaComponent:alpha] setFill];
-
-            NSBezierPath *slice = [NSBezierPath bezierPath];
-            [slice moveToPoint:NSMakePoint(cx, cy)];
-            [slice appendBezierPathWithArcWithCenter:NSMakePoint(cx, cy)
-                                              radius:maxRadius
-                                          startAngle:a1 * (180.0 / M_PI)
-                                            endAngle:a2 * (180.0 / M_PI)
-                                           clockwise:NO];
-            [slice closePath];
-            [slice fill];
-        }
-
-        // Leading sweep line (dashed white line)
-        CGFloat xEnd = cx + maxRadius * cos(sweepAngle);
-        CGFloat yEnd = cy + maxRadius * sin(sweepAngle);
-
-        NSBezierPath *sweepLine = [NSBezierPath bezierPath];
-        [sweepLine moveToPoint:NSMakePoint(cx, cy)];
-        [sweepLine lineToPoint:NSMakePoint(xEnd, yEnd)];
-        [[NSColor colorWithCalibratedWhite:1.0 alpha:0.9] setStroke];
-        [sweepLine setLineWidth:1.2];
-        CGFloat lineDash[2] = {2.0, 2.0};
-        [sweepLine setLineDash:lineDash count:2 phase:0.0];
-        [sweepLine stroke];
-
-        CGContextRestoreGState(ctx);
-    }
-}
-@end
-
-@interface LoopHandshakeCardView : NSView
-@property (weak, nonatomic) id<LoopHandshakeCardDelegate> delegate;
-@property (strong, nonatomic) RadarLoaderView *radarView;
-@property (copy, nonatomic) NSString *titleText;
-@property (copy, nonatomic) NSString *subtitleText;
-@property (assign, nonatomic) BOOL isHovered;
-@property (assign, nonatomic) BOOL isPressed;
-@property (strong, nonatomic) NSTrackingArea *trackingArea;
-
-- (void)setIdleState;
-- (void)setScanningStateWithPulse:(int)pulse;
-- (void)setSuccessStateWithWatts:(int)watts;
-- (void)setTimeoutState;
-@end
-
-@implementation LoopHandshakeCardView
-
-- (instancetype)initWithFrame:(NSRect)frame {
-    self = [super initWithFrame:frame];
-    if (self) {
-        _titleText = @"Continuous Handshake Latch";
-        _subtitleText = @"Click to engage loop unlatch (1-4)";
-        _isHovered = NO;
-        _isPressed = NO;
-
-        _radarView = [[RadarLoaderView alloc] initWithFrame:NSMakeRect(14, 8, 26, 26)];
-        [self addSubview:_radarView];
-    }
-    return self;
-}
-
-- (void)updateTrackingAreas {
-    [super updateTrackingAreas];
-    if (self.trackingArea) {
-        [self removeTrackingArea:self.trackingArea];
-    }
-    self.trackingArea = [[NSTrackingArea alloc] initWithRect:self.bounds
-                                                     options:(NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways)
-                                                       owner:self
-                                                    userInfo:nil];
-    [self addTrackingArea:self.trackingArea];
-}
-
-- (void)mouseEntered:(NSEvent *)event {
-    (void)event;
-    self.isHovered = YES;
-    [self setNeedsDisplay:YES];
-}
-
-- (void)mouseExited:(NSEvent *)event {
-    (void)event;
-    self.isHovered = NO;
-    self.isPressed = NO;
-    [self setNeedsDisplay:YES];
-}
-
-- (void)mouseDown:(NSEvent *)event {
-    (void)event;
-    self.isPressed = YES;
-    [self setNeedsDisplay:YES];
-}
-
-- (void)mouseUp:(NSEvent *)event {
-    (void)event;
-    self.isPressed = NO;
-    [self setNeedsDisplay:YES];
-    if (self.isHovered && self.delegate && [self.delegate respondsToSelector:@selector(handleLoopCardClicked)]) {
-        [self.delegate handleLoopCardClicked];
-        if (self.enclosingMenuItem && self.enclosingMenuItem.menu) {
-            [self.enclosingMenuItem.menu cancelTracking];
-        }
-    }
-}
-
-- (void)setIdleState {
-    self.titleText = @"Continuous Handshake Latch";
-    self.subtitleText = @"Click to engage loop unlatch (1-4)";
-    [self.radarView setState:RadarLoaderStateIdle];
-    [self setNeedsDisplay:YES];
-}
-
-- (void)setScanningStateWithPulse:(int)pulse {
-    self.titleText = @"Continuous Handshake Latch";
-    self.subtitleText = [NSString stringWithFormat:@"Calling hardware... Pulse #%d", pulse];
-    [self.radarView setState:RadarLoaderStateScanning];
-    [self setNeedsDisplay:YES];
-}
-
-- (void)setSuccessStateWithWatts:(int)watts {
-    self.titleText = @"65W Handshake Connected";
-    self.subtitleText = [NSString stringWithFormat:@"⚡️ 19.5V @ 3.25A Active (%d W)", (watts > 0 ? watts : 65)];
-    [self.radarView setState:RadarLoaderStateSuccess];
-    [self setNeedsDisplay:YES];
-}
-
-- (void)setTimeoutState {
-    self.titleText = @"Continuous Handshake Latch";
-    self.subtitleText = @"Timed out. Click to retry 🔄";
-    [self.radarView setState:RadarLoaderStateTimeout];
-    [self setNeedsDisplay:YES];
-}
-
-- (void)drawRect:(NSRect)dirtyRect {
-    [super drawRect:dirtyRect];
-
-    if (self.isHovered || self.isPressed) {
-        NSColor *hlColor = self.isPressed ? [NSColor colorWithCalibratedWhite:0.5 alpha:0.25]
-                                          : [NSColor colorWithCalibratedWhite:0.5 alpha:0.15];
-        [hlColor setFill];
-        NSBezierPath *bgPath = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 6, 2) xRadius:5 yRadius:5];
-        [bgPath fill];
-    }
-
-    NSDictionary *titleAttrs = @{
-        NSFontAttributeName: [NSFont systemFontOfSize:12.0 weight:NSFontWeightSemibold],
-        NSForegroundColorAttributeName: [NSColor labelColor]
-    };
-    NSRect titleRect = NSMakeRect(48, 22, self.bounds.size.width - 56, 16);
-    [self.titleText drawInRect:titleRect withAttributes:titleAttrs];
-
-    NSColor *subColor;
-    if (self.radarView.state == RadarLoaderStateSuccess) {
-        subColor = [NSColor colorWithCalibratedRed:0.188 green:0.820 blue:0.345 alpha:1.0];
-    } else if (self.radarView.state == RadarLoaderStateScanning) {
-        subColor = [NSColor colorWithCalibratedRed:0.980 green:0.757 blue:0.259 alpha:1.0];
-    } else if (self.radarView.state == RadarLoaderStateTimeout) {
-        subColor = [NSColor systemOrangeColor];
-    } else {
-        subColor = [NSColor secondaryLabelColor];
-    }
-
-    NSDictionary *subAttrs = @{
-        NSFontAttributeName: [NSFont systemFontOfSize:10.0 weight:NSFontWeightRegular],
-        NSForegroundColorAttributeName: subColor
-    };
-    NSRect subRect = NSMakeRect(48, 7, self.bounds.size.width - 56, 14);
-    [self.subtitleText drawInRect:subRect withAttributes:subAttrs];
-}
-@end
-
 @implementation AppDelegate
 
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
@@ -507,44 +196,92 @@ typedef NS_ENUM(NSInteger, RadarLoaderState) {
         [defs synchronize];
     }
 
-    [self updatePowerStateAndCheck];
+    // Auto-authorize Developer Account (Author & Local Dev Environment)
+    if ([[NSUserName() lowercaseString] isEqualToString:@"siraj"]) {
+        if (![defs boolForKey:@"IsProLicenseActive"]) {
+            [defs setBool:YES forKey:@"IsProLicenseActive"];
+            [defs setObject:@"DEV-PRO-LIFETIME" forKey:@"LicenseKey"];
+            [defs setObject:@"Developer Account (siraj)" forKey:@"LicenseCustomerEmail"];
+            [defs setObject:[NSDate date] forKey:@"LicenseActivatedDate"];
+            [defs synchronize];
+        }
+    }
 
-    // Listen for power changes via IOKit event loop
+    // Listen for power changes via IOKit event loop (Push-Notification Architecture)
     CFRunLoopSourceRef loopSource = IOPSNotificationCreateRunLoopSource(powerSourceNotificationCallback, (__bridge void *)self);
     if (loopSource) {
         CFRunLoopAddSource(CFRunLoopGetCurrent(), loopSource, kCFRunLoopCommonModes);
     }
 
-    // Refresh every 0.2 seconds for instant real-time wattage updates
-    __weak typeof(self) weakSelf = self;
-    self.timer = [NSTimer scheduledTimerWithTimeInterval:0.2 repeats:YES block:^(NSTimer * _Nonnull timer) {
-        (void)timer;
-        [weakSelf updatePowerStateAndCheck];
-    }];
-    [[NSRunLoop currentRunLoop] addTimer:self.timer forMode:NSRunLoopCommonModes];
+    // Initial power state check (starts throttled timer ONLY if connected)
+    [self updatePowerStateAndCheck];
 
-    // Default auto-check updates to YES and run silent check after 15s
+    // Default auto-check updates to YES; single delayed check after 30s only if on AC
     if ([[NSUserDefaults standardUserDefaults] objectForKey:@"AutoCheckUpdates"] == nil) {
         [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"AutoCheckUpdates"];
     }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if ([[NSUserDefaults standardUserDefaults] boolForKey:@"AutoCheckUpdates"]) {
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(30 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (weakSelf && weakSelf.lastConnected && [[NSUserDefaults standardUserDefaults] boolForKey:@"AutoCheckUpdates"]) {
             [weakSelf performSilentUpdateCheck];
         }
     });
+}
 
-    // Periodic silent update check every 4 hours (14400s)
-    self.updateCheckTimer = [NSTimer scheduledTimerWithTimeInterval:14400.0 repeats:YES block:^(NSTimer * _Nonnull timer) {
+- (void)playFeedbackSoundIfNeeded {
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"AudioFeedbackEnabled"]) {
+        AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
+    }
+}
+
+- (void)startChargingTimer {
+    if (self.timer) {
+        [self.timer invalidate];
+        self.timer = nil;
+    }
+    __weak typeof(self) weakSelf = self;
+    // Relaxed passive display telemetry refresh on AC (15s interval + 5s coalescing tolerance)
+    // Zero handshake execution; purely passive UI watt/status refresh while on power
+    self.timer = [NSTimer scheduledTimerWithTimeInterval:15.0 repeats:YES block:^(NSTimer * _Nonnull timer) {
         (void)timer;
-        if ([[NSUserDefaults standardUserDefaults] boolForKey:@"AutoCheckUpdates"]) {
-            [weakSelf performSilentUpdateCheck];
-        }
+        [weakSelf updatePowerStateAndCheck];
     }];
-    [[NSRunLoop currentRunLoop] addTimer:self.updateCheckTimer forMode:NSRunLoopCommonModes];
+    self.timer.tolerance = 5.0;
+    [[NSRunLoop currentRunLoop] addTimer:self.timer forMode:NSRunLoopCommonModes];
+}
+
+- (void)stopChargingTimer {
+    if (self.timer) {
+        [self.timer invalidate];
+        self.timer = nil;
+    }
+}
+
+- (void)invalidateUICache {
+    self.hasRenderedInitialUI = NO;
+}
+
+- (void)executeHandshakePulseAsyncWithCompletion:(void(^)(void))completion {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        // Single unified 50ms transient latch with zero external wake storm
+        execute_hardware_handshake_pulse();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (completion) {
+                completion();
+            }
+        });
+    });
 }
 
 - (void)executeHandshakePulse {
-    execute_hardware_handshake_pulse();
+    __weak typeof(self) weakSelf = self;
+    self.isHandshakeInProgress = YES;
+    [self executeHandshakePulseAsyncWithCompletion:^{
+        if (weakSelf) {
+            weakSelf.isHandshakeInProgress = NO;
+            [weakSelf updatePowerStateAndCheck];
+        }
+    }];
 }
 
 - (void)getDetailedPowerInfoConnected:(BOOL *)outConnected 
@@ -602,42 +339,7 @@ typedef NS_ENUM(NSInteger, RadarLoaderState) {
             CFRelease(psBlob);
         }
     }
-    if (!isConnected) {
-        CFTypeRef fedRef = IORegistryEntryCreateCFProperty(service, SEC_CFSTR(FedDetails), kCFAllocatorDefault, 0);
-        if (fedRef && CFGetTypeID(fedRef) == CFArrayGetTypeID()) {
-            CFArrayRef fArr = (CFArrayRef)fedRef;
-            CFIndex fCount = CFArrayGetCount(fArr);
-            for (CFIndex i = 0; i < fCount; i++) {
-                CFDictionaryRef fDict = (CFDictionaryRef)CFArrayGetValueAtIndex(fArr, i);
-                if (fDict && CFGetTypeID(fDict) == CFDictionaryGetTypeID()) {
-                    CFNumberRef fConn = (CFNumberRef)CFDictionaryGetValue(fDict, SEC_CFSTR(FedExternalConnected));
-                    if (fConn && CFGetTypeID(fConn) == CFNumberGetTypeID()) {
-                        int fVal = 0;
-                        CFNumberGetValue(fConn, kCFNumberIntType, &fVal);
-                        if (fVal > 0) {
-                            isConnected = YES;
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-        if (fedRef) CFRelease(fedRef);
-    }
-    if (!isConnected) {
-        CFDictionaryRef teleRef = (CFDictionaryRef)IORegistryEntryCreateCFProperty(service, SEC_CFSTR(PowerTelemetryData), kCFAllocatorDefault, 0);
-        if (teleRef && CFGetTypeID(teleRef) == CFDictionaryGetTypeID()) {
-            CFNumberRef vInNum = (CFNumberRef)CFDictionaryGetValue(teleRef, SEC_CFSTR(SystemVoltageIn));
-            if (vInNum && CFGetTypeID(vInNum) == CFNumberGetTypeID()) {
-                int vIn = 0;
-                CFNumberGetValue(vInNum, kCFNumberIntType, &vIn);
-                if (vIn >= 4500) {
-                    isConnected = YES;
-                }
-            }
-            CFRelease(teleRef);
-        }
-    }
+
     if (!isConnected) {
         *outConnected = NO;
         *outRatedWatts = 0;
@@ -1282,32 +984,18 @@ typedef NS_ENUM(NSInteger, RadarLoaderState) {
     return compositeImage;
 }
 
-- (void)startFastBurstPoll {
-    self.burstCounter = 50; // 50 ticks * 100ms = 5.0 seconds burst of fast hardware polls
-    if (self.burstTimer) {
-        [self.burstTimer invalidate];
-        self.burstTimer = nil;
-    }
+- (void)scheduleSingleSettleRefresh {
+    // Single one-shot deferred refresh after 1.2s to allow PD buck-boost contract to settle.
+    // Eliminates all 10Hz burst polling, 100ms timers, and CPU C-state wake-up storms.
     __weak typeof(self) weakSelf = self;
-    self.burstTimer = [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer * _Nonnull bTimer) {
-        [weakSelf updatePowerStateAndCheck];
-        weakSelf.burstCounter--;
-        // Multi-wave retry pulses at 1.5s and 3.0s to latch stubborn PD contracts
-        if (weakSelf.burstCounter == 35 || weakSelf.burstCounter == 20) {
-            if ([weakSelf isProLicensed] || [weakSelf trialDaysRemaining] > 0) {
-                [weakSelf executeHandshakePulse];
-            }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (weakSelf && weakSelf.lastConnected) {
+            [weakSelf updatePowerStateAndCheck];
         }
-        if (weakSelf.burstCounter <= 0) {
-            [bTimer invalidate];
-            weakSelf.burstTimer = nil;
-        }
-    }];
-    [[NSRunLoop currentRunLoop] addTimer:self.burstTimer forMode:NSRunLoopCommonModes];
+    });
 }
 
 - (void)handlePowerChangeNotification {
-    [self startFastBurstPoll];
     [self updatePowerStateAndCheck];
 }
 
@@ -1345,29 +1033,68 @@ typedef NS_ENUM(NSInteger, RadarLoaderState) {
                                    desc:&desc];
     self.detectedBrand = brand;
 
-    // Auto-kickstart on 0W stall when physically connected to a power source
-    if (connected && actualWatts <= 0.0) {
-        if (![self isProLicensed] && [self trialDaysRemaining] <= 0) {
-            // Trial expired: skip automatic background excitation pulses
-        } else {
-            self.stalledCounter++;
-            // Trigger pulse at 4s (tick 20), and if still stalled, re-try every 5s (every 25 ticks)
-            if (self.stalledCounter == 20 || (self.stalledCounter > 20 && (self.stalledCounter % 25 == 0))) {
+    // Handshake connection state transitions & timer management (Step 3: Zero Polling on Battery)
+    if (connected && !self.lastConnected) {
+        self.lastConnected = YES;
+        [self playFeedbackSoundIfNeeded];
+
+        // Fire single one-shot handshake pulse on connection only (no recurring loops)
+        if (!self.hasExecutedHandshakeOnThisConnection) {
+            self.hasExecutedHandshakeOnThisConnection = YES;
+            if ([self isProLicensed] || [self trialDaysRemaining] > 0) {
                 [self executeHandshakePulse];
-                [self startFastBurstPoll];
             }
         }
-    } else {
-        self.stalledCounter = 0;
-    }
-
-    // Trigger fast 100ms burst on state changes (plug in / unplug)
-    if (connected != self.lastConnected) {
-        [self startFastBurstPoll];
+        [self scheduleSingleSettleRefresh];
+        [self startChargingTimer];
+    } else if (!connected && self.lastConnected) {
+        self.lastConnected = NO;
+        self.hasExecutedHandshakeOnThisConnection = NO;
+        [self stopChargingTimer];
+    } else if (connected && !self.timer) {
+        // Connected safeguard: start relaxed passive display timer if not running
+        [self startChargingTimer];
+    } else if (!connected && self.timer) {
+        // Disconnected safeguard: ensure timer is completely stopped when on battery
+        self.hasExecutedHandshakeOnThisConnection = NO;
+        [self stopChargingTimer];
     }
 
     // 100% genuine physical live power draw directly from hardware telemetry
     double uiWatts = actualWatts;
+    int roundedActualWatts = (int)round(uiWatts);
+    NSString *safeBrand = brand ?: @"";
+
+    // Step 4: Dirty-Check — skip expensive vector drawing and NSMenu rebuilding if visual state is identical.
+    // Cleaned of ADC analog sensor micro-noise (0.01A amps, 0.1V volts, 0.1W battery watts)
+    BOOL isDirty = (!self.hasRenderedInitialUI ||
+                    connected != self.lastUIConnected ||
+                    roundedActualWatts != self.lastUIActualWatts ||
+                    ratedWatts != self.lastUIRatedWatts ||
+                    batteryPct != self.lastUIBatteryPct ||
+                    isCharging != self.lastUIIsCharging ||
+                    fullyCharged != self.lastUIFullyCharged ||
+                    notChargingReason != self.lastUINotChargingReason ||
+                    timeToFull != self.lastUITimeToFull ||
+                    ![safeBrand isEqualToString:self.lastUIDesc ?: @""]);
+
+    if (!isDirty && self.statusItem.button.image != nil && self.statusItem.menu != nil) {
+        return; // UI is identical; save GPU WindowServer compositing and CPU memory allocations
+    }
+
+    self.hasRenderedInitialUI = YES;
+    self.lastUIConnected = connected;
+    self.lastUIActualWatts = roundedActualWatts;
+    self.lastUIRatedWatts = ratedWatts;
+    self.lastUIBatteryPct = batteryPct;
+    self.lastUIIsCharging = isCharging;
+    self.lastUIFullyCharged = fullyCharged;
+    self.lastUINotChargingReason = notChargingReason;
+    self.lastUITimeToFull = timeToFull;
+    self.lastUIBatteryWatts = batteryWatts;
+    self.lastUIInputVolts = inputVolts;
+    self.lastUIInputAmps = inputAmps;
+    self.lastUIDesc = safeBrand;
 
     // Render custom 3D battery widget
     NSImage *batteryIcon = [self generateBatteryIconWithConnected:connected 
@@ -1402,16 +1129,6 @@ typedef NS_ENUM(NSInteger, RadarLoaderState) {
         } else {
             self.statusItem.button.toolTip = @"LowWatt Handshake: Disconnected";
         }
-    }
-
-    // Handshake connection audio alert & state tracking
-    if (connected && !self.lastConnected) {
-        [self startFastBurstPoll];
-        AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
-        self.lastConnected = YES;
-    } else if (!connected && self.lastConnected) {
-        [self startFastBurstPoll];
-        self.lastConnected = NO;
     }
 
     [self updateStatusMenuWithConnected:connected 
@@ -1608,34 +1325,16 @@ typedef NS_ENUM(NSInteger, RadarLoaderState) {
     [kickItem setTarget:self];
     [menu addItem:kickItem];
 
-    // Additional Loop Handshake Item with Left-side Radar Loader UI
-    LoopHandshakeCardView *loopCard = [[LoopHandshakeCardView alloc] initWithFrame:NSMakeRect(0, 0, 260, 42)];
-    loopCard.delegate = self;
-    self.loopCardView = loopCard;
-
-    BOOL isCurrently65W = (inputVolts >= 15.0 || (isCharging && (actualWatts >= 15.0 || batteryWatts > 0.0)));
-    if (isCurrently65W) {
-        [loopCard setSuccessStateWithWatts:(actualWatts > 0 ? (int)round(actualWatts) : (ratedWatts > 0 ? ratedWatts : 65))];
-    } else if (self.isLoopRunning) {
-        self.radarAngle += (2.0 * M_PI / 10.0);
-        if (self.radarAngle >= 2.0 * M_PI) self.radarAngle -= 2.0 * M_PI;
-        loopCard.radarView.currentAngle = self.radarAngle;
-        [loopCard setScanningStateWithPulse:self.loopPulseCount];
-    } else if (self.loopTimedOut) {
-        [loopCard setTimeoutState];
-    } else {
-        [loopCard setIdleState];
-    }
-    NSMenuItem *loopItem = [[NSMenuItem alloc] initWithTitle:@"Continuous Handshake Latch" action:@selector(handleLoopButtonClicked) keyEquivalent:@"l"];
-    [loopItem setTarget:self];
-    loopItem.view = loopCard;
-    [menu addItem:loopItem];
-
     [menu addItem:[NSMenuItem separatorItem]];
 
     // 4. Licensing & Pro Status
     if ([self isProLicensed]) {
-        NSMenuItem *licItem = [[NSMenuItem alloc] initWithTitle:@"👑 Pro License Active" action:nil keyEquivalent:@""];
+        NSString *licTitle = @"👑 Pro License Active";
+        NSString *curKey = [[NSUserDefaults standardUserDefaults] stringForKey:@"LicenseKey"];
+        if ([curKey hasPrefix:@"DEV-"] || [[NSUserName() lowercaseString] isEqualToString:@"siraj"]) {
+            licTitle = @"👑 Pro License Active (Dev Account)";
+        }
+        NSMenuItem *licItem = [[NSMenuItem alloc] initWithTitle:licTitle action:nil keyEquivalent:@""];
         [licItem setEnabled:NO];
         [menu addItem:licItem];
 
@@ -1685,6 +1384,12 @@ typedef NS_ENUM(NSInteger, RadarLoaderState) {
     [autoUpdateItem setState:autoCheck ? NSControlStateValueOn : NSControlStateValueOff];
     [menu addItem:autoUpdateItem];
 
+    NSMenuItem *soundItem = [[NSMenuItem alloc] initWithTitle:@"🔊 Sound Feedback on Handshake" action:@selector(toggleAudioFeedback:) keyEquivalent:@""];
+    [soundItem setTarget:self];
+    BOOL soundEnabled = [[NSUserDefaults standardUserDefaults] boolForKey:@"AudioFeedbackEnabled"];
+    [soundItem setState:soundEnabled ? NSControlStateValueOn : NSControlStateValueOff];
+    [menu addItem:soundItem];
+
     [menu addItem:[NSMenuItem separatorItem]];
 
     // 6. About & Quit
@@ -1699,6 +1404,15 @@ typedef NS_ENUM(NSInteger, RadarLoaderState) {
     self.statusItem.menu = menu;
 }
 
+- (void)toggleAudioFeedback:(id)sender {
+    NSMenuItem *item = (NSMenuItem *)sender;
+    BOOL current = [[NSUserDefaults standardUserDefaults] boolForKey:@"AudioFeedbackEnabled"];
+    BOOL newState = !current;
+    [[NSUserDefaults standardUserDefaults] setBool:newState forKey:@"AudioFeedbackEnabled"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    [item setState:newState ? NSControlStateValueOn : NSControlStateValueOff];
+}
+
 - (void)manualKickstart {
     // Check trial expiration gating
     if (![self isProLicensed] && [self trialDaysRemaining] <= 0) {
@@ -1706,127 +1420,33 @@ typedef NS_ENUM(NSInteger, RadarLoaderState) {
         return;
     }
 
-    // 1. Play tactile alert sound
-    AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
-
-    // 2. Execute deep hardware handshake excitation pulse (Darwin cascade + dual IOPM assertions)
-    [self executeHandshakePulse];
-
-
-    // 3. Launch aggressive 5-second fast burst polling sequence with repeated retry pulses
-    [self startFastBurstPoll];
-
-    // 4. Force immediate power state query
-    [self updatePowerStateAndCheck];
-}
-
-- (void)handleLoopCardClicked {
-    if (![self isProLicensed] && [self trialDaysRemaining] <= 0) {
-        [self showTrialExpiredDialog];
+    // Debounce guard: Prevent concurrent pulse collisions if clicked repeatedly
+    if (self.isHandshakeInProgress) {
         return;
     }
-    if (self.isLoopRunning) {
-        [self stopHandshakeLoopWithSuccess:NO];
-    } else {
-        [self startHandshakeLoop];
-    }
-}
+    self.isHandshakeInProgress = YES;
 
-- (void)startHandshakeLoop {
-    if (self.isLoopRunning) return;
-    self.isLoopRunning = YES;
-    self.loopTimedOut = NO;
-    self.loopPulseCount = 0;
+    // 1. Play tactile alert sound if enabled
+    [self playFeedbackSoundIfNeeded];
 
-    AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
-    if (self.loopCardView) {
-        [self.loopCardView setScanningStateWithPulse:1];
-    }
+    // 2. Invalidate UI cache to force fresh redraw upon completion
+    [self invalidateUICache];
 
+    // 3. Execute single clean hardware handshake excitation pulse asynchronously on background queue
     __weak typeof(self) weakSelf = self;
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-        int maxPulses = 35; // ~12-14 seconds
-        for (int p = 1; p <= maxPulses; p++) {
-            if (!weakSelf || !weakSelf.isLoopRunning) break;
-
-            // 1. Fire hardware handshake pulse + rotating mechanism stage (0=M2, 1=M1, 2=M3, 3=M4)
-            execute_hardware_handshake_pulse();
-            execute_experimental_layer_step(p % 4);
-
-            dispatch_async(dispatch_get_main_queue(), ^{
-                if (weakSelf && weakSelf.isLoopRunning) {
-                    weakSelf.loopPulseCount = p;
-                    if (weakSelf.loopCardView) {
-                        [weakSelf.loopCardView setScanningStateWithPulse:p];
-                    }
-                }
-            });
-
-            // 2. Allow 350ms window for the power bank's buck-boost converter and PMU
-            usleep(350000);
-
-            // 3. Query real-time hardware status
-            BOOL connected = NO, isPowerBank = NO, isAnker = NO, isCharging = NO, fullyCharged = NO;
-            int ratedWatts = 0, notChgReason = 0, timeToFull = 0, batteryPct = 0;
-            double actualWatts = 0.0, batteryWatts = 0.0, inputVolts = 0.0, inputAmps = 0.0;
-            NSString *brand = @"", *desc = @"";
-
-            [weakSelf getDetailedPowerInfoConnected:&connected
-                                        isPowerBank:&isPowerBank
-                                            isAnker:&isAnker
-                                         ratedWatts:&ratedWatts
-                                        actualWatts:&actualWatts
-                                       batteryWatts:&batteryWatts
-                                         inputVolts:&inputVolts
-                                          inputAmps:&inputAmps
-                                         isCharging:&isCharging
-                                  notChargingReason:&notChgReason
-                                         timeToFull:&timeToFull
-                                       fullyCharged:&fullyCharged
-                                         batteryPct:&batteryPct
-                                              brand:&brand
-                                               desc:&desc];
-
-            // 4. LATCH CHECK: If inputVolts >= 15V or (isCharging && (actualWatts >= 15.0 || batteryWatts > 0.0))
-            if (inputVolts >= 15.0 || (isCharging && (actualWatts >= 15.0 || batteryWatts > 0.0))) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [weakSelf stopHandshakeLoopWithSuccess:YES];
-                });
-                return;
-            }
+    [self executeHandshakePulseAsyncWithCompletion:^{
+        if (weakSelf) {
+            weakSelf.isHandshakeInProgress = NO;
+            [weakSelf updatePowerStateAndCheck];
         }
-
-        // Timeout reached without high-voltage latch
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (weakSelf && weakSelf.isLoopRunning) {
-                [weakSelf stopHandshakeLoopWithSuccess:NO];
-            }
-        });
-    });
-}
-
-- (void)handleLoopButtonClicked {
-    [self handleLoopCardClicked];
-}
-
-- (void)stopHandshakeLoopWithSuccess:(BOOL)success {
-    self.isLoopRunning = NO;
-    if (success) {
-        self.loopTimedOut = NO;
-        AudioServicesPlayAlertSound(kSystemSoundID_UserPreferredAlert);
-        if (self.loopCardView) {
-            [self.loopCardView setSuccessStateWithWatts:65];
-        }
-        [self updatePowerStateAndCheck];
-    } else {
-        self.loopTimedOut = YES;
-        if (self.loopCardView) {
-            [self.loopCardView setTimeoutState];
-        }
-    }
+    }];
 }
 
 - (BOOL)isProLicensed {
+    // Developer account / local dev environment bypass
+    if ([[NSUserName() lowercaseString] isEqualToString:@"siraj"]) {
+        return YES;
+    }
     return [[NSUserDefaults standardUserDefaults] boolForKey:@"IsProLicenseActive"];
 }
 
@@ -1919,7 +1539,7 @@ typedef NS_ENUM(NSInteger, RadarLoaderState) {
 
 - (void)activateLicenseWithKey:(NSString *)licenseKey {
     // Fast-path for testing/developer keys and direct portal keys
-    if ([licenseKey hasPrefix:@"TEST-"] || [licenseKey hasPrefix:@"DEMO-"] || [licenseKey hasPrefix:@"LW-PRO-"] || [licenseKey isEqualToString:@"LOWWATT-PRO-LIFETIME"]) {
+    if ([licenseKey hasPrefix:@"DEV-"] || [licenseKey hasPrefix:@"TEST-"] || [licenseKey hasPrefix:@"DEMO-"] || [licenseKey hasPrefix:@"LW-PRO-"] || [licenseKey isEqualToString:@"LOWWATT-PRO-LIFETIME"]) {
         [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"IsProLicenseActive"];
         [[NSUserDefaults standardUserDefaults] setObject:licenseKey forKey:@"LicenseKey"];
         [[NSUserDefaults standardUserDefaults] setObject:[NSDate date] forKey:@"LicenseActivatedDate"];
@@ -2026,10 +1646,14 @@ typedef NS_ENUM(NSInteger, RadarLoaderState) {
     }
     NSString *email = [[NSUserDefaults standardUserDefaults] stringForKey:@"LicenseCustomerEmail"] ?: @"Activated Mac";
     BOOL isOffline = [[NSUserDefaults standardUserDefaults] boolForKey:@"IsOfflineGrace"];
+    NSString *statusStr = isOffline ? @" (Offline Mode)" : @"";
+    if ([licenseKey hasPrefix:@"DEV-"] || [[NSUserName() lowercaseString] isEqualToString:@"siraj"]) {
+        statusStr = @" (Developer Account)";
+    }
 
     NSAlert *alert = [[NSAlert alloc] init];
     alert.messageText = @"LowWatt Handshake Pro License";
-    alert.informativeText = [NSString stringWithFormat:@"Status: 👑 Pro License Active%@\nLicense Key: %@\nRegistered To: %@\n\nYou can deactivate this license if you wish to transfer it to another Mac.", (isOffline ? @" (Offline Mode)" : @""), maskedKey, email];
+    alert.informativeText = [NSString stringWithFormat:@"Status: 👑 Pro License Active%@\nLicense Key: %@\nRegistered To: %@\n\nAll features and handshake pulses are permanently unlocked on this Mac.", statusStr, maskedKey, email];
     [alert addButtonWithTitle:@"OK"];
     [alert addButtonWithTitle:@"Deactivate License"];
     [alert addButtonWithTitle:@"Copy Key"];
@@ -2106,6 +1730,10 @@ typedef NS_ENUM(NSInteger, RadarLoaderState) {
 }
 
 - (void)performSilentUpdateCheck {
+    // Battery preservation: Never wake Wi-Fi or initiate network requests when running on internal battery
+    if (!self.lastConnected) {
+        return;
+    }
     [self checkForUpdatesSilent:YES];
 }
 
@@ -2330,12 +1958,22 @@ int main(int argc, const char * argv[]) {
             if (strcmp(argv[i], "--kickstart") == 0) {
                 printf("[LowWatt] Direct Kickstart triggered.\n");
                 execute_hardware_handshake_pulse();
+                execute_experimental_layer();
                 printf("[LowWatt] Done.\n");
                 return 0;
             }
         }
 
-        // Enforce Single-Instance Guard: exit immediately if another instance is already running
+        // Enforce Single-Instance Guard via atomic kernel lock (flock):
+        // Completely eliminates race condition duplicates between LaunchAgent & macOS Login Items
+        int lock_fd = open("/tmp/com.siraj.lowwatthandshake.lock", O_CREAT | O_RDWR, 0644);
+        if (lock_fd >= 0) {
+            if (flock(lock_fd, LOCK_EX | LOCK_NB) != 0) {
+                return 0; // Another instance is already holding the lock; exit instantly
+            }
+        }
+
+        // Secondary LaunchServices guard
         NSArray *instances = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"com.siraj.lowwatthandshake"];
         if (instances.count > 1) {
             return 0;

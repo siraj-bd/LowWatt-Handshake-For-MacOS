@@ -128,57 +128,27 @@ static const char *sec_get_cstr(const uint8_t *data, size_t len, char *out_buf) 
 
 #define SEC_CFSTR(name) ((__bridge CFStringRef)sec_get_string(K_##name, sizeof(K_##name)))
 
-// Control Flow Flattened Hardware Handshake Pulse Engine (Full 5-Point Cascade + Dual PM Assertions)
+// Single Unified 50ms Non-Invasive Transient Hardware Handshake Pulse
 __attribute__((noinline, optnone))
 static void execute_hardware_handshake_pulse(void) {
-    char s_buf[64];
-
-    // Stage 1: Initial Five-point Darwin Power Management notification cascade
-    sec_get_cstr(K_com_apple_system_powersources_source, sizeof(K_com_apple_system_powersources_source), s_buf);
-    notify_post(s_buf);
-
-    sec_get_cstr(K_com_apple_system_powersources_timer, sizeof(K_com_apple_system_powersources_timer), s_buf);
-    notify_post(s_buf);
-
-    sec_get_cstr(K_com_apple_system_powersources, sizeof(K_com_apple_system_powersources), s_buf);
-    notify_post(s_buf);
-
-    sec_get_cstr(K_com_apple_PowerManagement_rescheduled, sizeof(K_com_apple_PowerManagement_rescheduled), s_buf);
-    notify_post(s_buf);
-
-    sec_get_cstr(K_com_apple_system_lowpowermode, sizeof(K_com_apple_system_lowpowermode), s_buf);
-    notify_post(s_buf);
-
-    // Stage 2: Dual-level Power Management active assertion cycle (accelerates CC-pin polling & wakes PHY)
+    // Safe Transient Power Management assertion cycle
     IOPMAssertionID sysAssertion = 0;
-    IOPMAssertionID dispAssertion = 0;
     NSString *astName = sec_get_string(K_LowWattHandshakeKickstart, sizeof(K_LowWattHandshakeKickstart));
 
-    IOPMAssertionCreateWithName(
+    IOReturn ret = IOPMAssertionCreateWithName(
         kIOPMAssertionTypePreventUserIdleSystemSleep,
         kIOPMAssertionLevelOn,
         (__bridge CFStringRef)astName,
         &sysAssertion
     );
-    IOPMAssertionCreateWithName(
-        kIOPMAssertionTypePreventUserIdleDisplaySleep,
-        kIOPMAssertionLevelOn,
-        (__bridge CFStringRef)astName,
-        &dispAssertion
-    );
 
-    // 40ms primary hardware excitation window
-    usleep(40000);
+    // Exact 50ms transient hardware stabilization window
+    usleep(50000);
 
-    // Stage 3: Second cascade wave to ensure latching on slow microcontrollers
-    notify_post(sec_get_cstr(K_com_apple_system_powersources, sizeof(K_com_apple_system_powersources), s_buf));
-    notify_post(sec_get_cstr(K_com_apple_system_powersources_source, sizeof(K_com_apple_system_powersources_source), s_buf));
-
-    // 40ms secondary hardware excitation window
-    usleep(40000);
-
-    if (sysAssertion != 0) IOPMAssertionRelease(sysAssertion);
-    if (dispAssertion != 0) IOPMAssertionRelease(dispAssertion);
+    if (ret == kIOReturnSuccess && sysAssertion != 0) {
+        IOPMAssertionRelease(sysAssertion);
+    }
+    // Zero external notify_post: Prevents waking system daemons; UI updates via internal GCD callback
 }
 
 #endif // SECURITY_OBFUSCATION_H
