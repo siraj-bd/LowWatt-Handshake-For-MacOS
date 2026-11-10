@@ -429,6 +429,7 @@ def save_live_order(txid, amount, plan_id, license_key):
 
 def binance_monitor_loop():
     print("⚡ Binance Live Zero-Input Payment Monitor Started...")
+    start_time_ms = int(time.time() * 1000) - 60000 # Only process new transactions
     while True:
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -437,6 +438,9 @@ def binance_monitor_loop():
             # 1. Check Binance Pay
             pay_txs = get_binance_pay_transactions()
             for tx in pay_txs:
+                tx_time = int(tx.get("transactionTime", 0))
+                if tx_time > 0 and tx_time < start_time_ms:
+                    continue
                 order_id = str(tx.get("orderId", ""))
                 try:
                     amount = float(tx.get("amount", 0))
@@ -474,6 +478,9 @@ def binance_monitor_loop():
             # 2. Check Crypto Deposits (USDT)
             deposits = get_binance_deposits()
             for dep in deposits:
+                insert_time = int(dep.get("insertTime", 0))
+                if insert_time > 0 and insert_time < start_time_ms:
+                    continue
                 tx_id = str(dep.get("txId", ""))
                 try:
                     amount = float(dep.get("amount", 0))
