@@ -163,7 +163,14 @@ def get_main_menu_keyboard():
     keyboard.append([{"text": "ℹ️ What is LowWatt Handshake?", "callback_data": "info_about"}])
     return {"inline_keyboard": keyboard}
 
-def handle_start(chat_id, user_first_name):
+def handle_start(chat_id, user_first_name, param=None):
+    if param:
+        clean_param = param.strip()
+        plan_id = clean_param[5:] if clean_param.startswith("plan_") else clean_param
+        if plan_id in PLANS:
+            handle_plan_selected(chat_id, plan_id, method="binance")
+            return
+
     text = (
         f"⚡ *Welcome to LowWatt Handshake License Portal*, {user_first_name}!\n\n"
         "Unlock permanent USB-C Power Delivery charging for your Mac with unsupported low-wattage chargers & power banks.\n\n"
@@ -571,7 +578,9 @@ def run_bot():
                         text = msg.get("text", "")
 
                         if text == "/start" or text.startswith("/start"):
-                            handle_start(chat_id, first_name)
+                            parts = text.split()
+                            param = parts[1] if len(parts) > 1 else None
+                            handle_start(chat_id, first_name, param)
                         elif text:
                             handle_text_message(chat_id, username, text)
 
